@@ -1,0 +1,2944 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+<style>
+html, body {
+margin:0;
+height:100%;
+}
+</style>
+</head>
+<body>
+
+
+<div id="project" style="font-family:tahoma;height:100%;">
+<div id="loading" style="position:absolute;display:block;top:50%;width:100%;text-align:center;font-family:arial;font-size:40px;color:#ffffff;text-shadow:1px 1px 4px #393342;">LOADED <span id="loading_amount"></span></div>
+<div id="begin" style="cursor:pointer;z-index:2;position:absolute;display:none;top:50%;width:100%;text-align:center;font-family:arial;font-size:40px;color:#ffffff;text-shadow:1px 1px 4px #393342;">START</div>
+<canvas id="canvas" style="display:block;"></canvas>
+<canvas id="canvas_hud" style="display:block;position:absolute;top:0;left:0;"></canvas>
+</div>
+
+
+<script type="importmap">
+{
+"imports":{
+"three": "./js/0_three/three_172.js",
+"three/addons/": "./js/0_three/"
+}
+}
+</script>
+
+
+<script type="module">
+
+
+"use strict"
+
+
+import * as THREE from "three";
+import Stats from "./js/stats/stats.js";
+import GPUStatsPanel from "./js/stats/GPUStatsPanel.js";
+import {FirstPersonControls} from "three/addons/controls/FirstPersonControls.js";
+import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
+import * as THREE_OBJLoader from "three/addons/loaders/OBJLoader.js"; // MODIFIED
+import * as THREE_FBXLoader from "three/addons/loaders/FBXLoader.js"; // MODIFIED
+let renderer_stats_m=0;
+
+
+let renderer_stats_canvas=document.createElement("canvas");
+renderer_stats_canvas.id="renderer_stats";
+renderer_stats_canvas.style.cssText="opacity:0.9;position:fixed;left:0px;top:48px;";
+renderer_stats_canvas.width=120;
+renderer_stats_canvas.height=85;
+
+
+let renderer_stats_ctx=renderer_stats_canvas.getContext("2d");
+renderer_stats_ctx.font="10px tahoma";
+renderer_stats_ctx.translate(10,5);
+
+
+function renderer_stats_reset(num){
+renderer_stats_m=num;
+renderer_stats_canvas.height+=40;
+renderer_stats_ctx.font="10px tahoma";
+renderer_stats_ctx.translate(10,5);
+}
+
+
+function renderer_stats_update(num,item){
+
+
+if(num==0){ renderer_stats_update_big(); }
+else{
+if(num>renderer_stats_m){ renderer_stats_reset(num,item); }
+renderer_stats_update_small(num,item);
+}
+
+
+}
+
+
+function renderer_stats_r(v){
+return String(v).replace(/\B(?=(\d{3})+(?!\d))/g,".");
+}
+
+
+function renderer_stats_update_big(){
+
+
+renderer_stats_ctx.fillStyle="#1D467C";
+renderer_stats_ctx.fillRect(-10,-5,renderer_stats_canvas.width,renderer_stats_canvas.height);
+renderer_stats_ctx.fillStyle="#ffffff";
+
+
+let item_1=renderer.info;
+let item_2=item_1.render;
+renderer_stats_ctx.fillText("GEOMETRIES: "+renderer_stats_r(item_1.memory.geometries),0,10);
+renderer_stats_ctx.fillText("TEXTURES: "+renderer_stats_r(item_1.memory.textures),0,20);
+renderer_stats_ctx.fillText("SHADERS: "+renderer_stats_r(item_1.programs.length),0,30);
+renderer_stats_ctx.fillText("CALLS: "+renderer_stats_r(item_2.calls),0,40);
+renderer_stats_ctx.fillText("TRIANGLES: "+renderer_stats_r(item_2.triangles),0,50);
+renderer_stats_ctx.fillText("LINES: "+renderer_stats_r(item_2.lines),0,60);
+renderer_stats_ctx.fillText("POINTS: "+renderer_stats_r(item_2.points),0,70);
+
+
+}
+
+
+function renderer_stats_update_small(num,item){
+
+
+item=item.info.render;
+renderer_stats_ctx.fillText("CALLS: "+renderer_stats_r(item.calls),0,80+(40*(num-1)));
+renderer_stats_ctx.fillText("TRIANGLES: "+renderer_stats_r(item.triangles),0,90+(40*(num-1)));
+renderer_stats_ctx.fillText("LINES: "+renderer_stats_r(item.lines),0,100+(40*(num-1)));
+renderer_stats_ctx.fillText("POINTS: "+renderer_stats_r(item.points),0,110+(40*(num-1)));
+
+
+}
+let texa=[]; // АНИМАЦИИ ТЕКСТУР
+let texa_frames=[]; // КАДРЫ АНИМАЦИЙ ТЕКСТУР
+
+
+// ____________________ СОЗДАНИЕ МАССИВА КАДРОВ ДЛЯ АНИМАЦИИ ____________________
+
+
+function texa_frames_gen(name,item,columns,rows,frames_total){
+
+
+texa_frames[name]=[];
+let count=0;
+
+
+for(let x=0;x<rows;x++){
+for(let y=0;y<columns;y++){
+texa_frames[name].push([item[0][0]*columns,item[0][1]*rows,item[0][2]+y*(1/item[0][0])/columns,1-(item[6]+item[5]/rows)/item[3]-(x*(1/item[0][1])/rows)]);
+count++;
+if(count==frames_total){ break; }
+}
+if(count==frames_total){ break; }
+}
+
+
+// КОПИРУЕМ КАК НОВУЮ ТЕКСТУРУ
+atlas[name]=[[item[0][0],item[0][1],item[0][2],item[0][3]],item[1],item[2],item[3],item[4],item[5],item[6]];
+
+
+}
+
+
+// ____________________ СОЗДАНИЕ ДАННЫХ АНИМАЦИИ И ВОЗВРАТ ПЕРВОГО КАДРА ____________________
+
+
+function texa_set(name,anim,speed,current_frame,repeats_total){
+
+
+texa[name]={}
+let item=texa[name];
+item.current_frame=current_frame;
+item.passed_time=0;
+item.frames_total=texa_frames[anim].length;
+item.speed=speed;
+if(repeats_total!=undefined){
+item.frames_passed=current_frame;
+item.frames_limit=repeats_total*item.frames_total;
+}
+item.frame=texa_frames[anim];
+return item.frame[item.current_frame];
+
+
+}
+
+
+// ____________________ СОЗДАНИЕ ДАННЫХ АНИМАЦИИ ДЛЯ КЛОНИРОВАНИЯ ____________________
+
+
+function texa_gen(name,anim,speed,current_frame,repeats_total){
+
+
+texa[name]={}
+let item=texa[name];
+item.current_frame=current_frame;
+item.passed_time=0;
+item.frames_total=texa_frames[anim].length;
+item.speed=speed;
+if(repeats_total!=undefined){
+item.frames_passed=current_frame;
+item.frames_limit=repeats_total*item.frames_total;
+}
+item.frame=texa_frames[anim];
+
+
+item=atlas[anim];
+// КОПИРУЕМ КАК НОВУЮ ТЕКСТУРУ
+atlas[name]=[[item[0][0],item[0][1],item[0][2],item[0][3]],item[1],item[2],item[3],item[4],item[5],item[6]];
+
+
+}
+
+
+// ____________________ АНИМАЦИЯ ТЕКСТУРЫ ОДНОРАЗОВАЯ ____________________
+
+
+/* 10.000 РАСЧЁТОВ ЗАНИМАЕТ 0.10МС
+let m=9090; for(let z=0;z<200;z++){ let s=performance.now(); for(let u=0;u<10000;u++){ texa_once(texa["coin_once"]); } let e=performance.now()-s; if(m>e){ m=e; } } console.log(m);
+*/
+
+
+function texa_once(item){
+
+
+// ДОБАВЛЯЕМ ПРОШЕДШЕЕ ВРЕМЯ К НАКОПЛЕННОМУ ВРЕМЕНИ
+item.passed_time+=delta;
+// НАХОДИМ ЦЕЛЫЕ КАДРЫ
+let frames=Math.floor(item.passed_time/item.speed);
+// ОТ НАКОПЛЕННОГО ВРЕМЕНИ ОТНИМАЕМ НАЙДЕННЫЕ КАДРЫ
+item.passed_time-=frames*item.speed;
+// ДОБАВЯЕМ КАДРЫ
+item.current_frame+=frames;
+if(item.current_frame<item.frames_total){ return true; }
+
+
+}
+
+
+// ____________________ АНИМАЦИЯ ТЕКСТУРЫ МНОГОРАЗОВАЯ ____________________
+
+
+/* 10.000 РАСЧЁТОВ ЗАНИМАЕТ 0.20МС
+let m=9090; for(let z=0;z<200;z++){ let s=performance.now(); for(let n=0;n<10000;n++){ texa_repeats(texa["coin_repeats"]); } let e=performance.now()-s; if(m>e){ m=e; } } console.log(m);
+*/
+
+
+function texa_repeats(item){
+
+
+let speed=item.speed;
+// ДОБАВЛЯЕМ ПРОШЕДШЕЕ ВРЕМЯ К НАКОПЛЕННОМУ ВРЕМЕНИ
+item.passed_time+=delta;
+// ОТРЕЗАЕМ ПОВТОРЫ И БЕРЁМ ЛИШЬ ЧИСТОЕ ВРЕМЯ
+let clean=item.passed_time%(item.frames_total*speed);
+// НАХОДИМ ЦЕЛЫЕ КАДРЫ
+let frames=Math.floor(clean/speed);
+item.frames_passed+=Math.floor(item.passed_time/speed);
+// В НАКОПЛЕННОЕ ВРЕМЯ ЗАПИСЫВАЕМ ЧИСТОЕ ВРЕМЯ С ОТНЯТИЕМ ЦЕЛЫХ КАДРОВ
+item.passed_time=clean-frames*speed;
+// НАХОДИМ НОМЕР КАДРА С УЧЁТОМ ПОВТОРА
+item.current_frame=(item.current_frame+frames)%item.frames_total;
+if(item.frames_passed<item.frames_limit){ return true; }
+
+
+}
+
+
+// ____________________ АНИМАЦИЯ ТЕКСТУРЫ БЕСКОНЕЧНАЯ____________________
+
+
+/* 10.000 РАСЧЁТОВ ЗАНИМАЕТ 0.20МС
+let m=9090; for(let z=0;z<200;z++){ let s=performance.now(); for(let u=0;u<10000;u++){ texa_loop(texa["coin_loop"]); } let e=performance.now()-s; if(m>e){ m=e; } } console.log(m);
+*/
+
+
+function texa_loop(item){
+
+
+let speed=item.speed;
+// ДОБАВЛЯЕМ ПРОШЕДШЕЕ ВРЕМЯ К НАКОПЛЕННОМУ ВРЕМЕНИ
+item.passed_time+=delta;
+// ОТРЕЗАЕМ ПОВТОРЫ И БЕРЁМ ЛИШЬ ЧИСТОЕ ВРЕМЯ
+let clean=item.passed_time%(item.frames_total*speed);
+// НАХОДИМ ЦЕЛЫЕ КАДРЫ
+let frames=Math.floor(clean/speed);
+// В НАКОПЛЕННОЕ ВРЕМЯ ЗАПИСЫВАЕМ ЧИСТОЕ ВРЕМЯ С ОТНЯТИЕМ ЦЕЛЫХ КАДРОВ
+item.passed_time=clean-frames*speed;
+// НАХОДИМ НОМЕР КАДРА С УЧЁТОМ ПОВТОРА
+item.current_frame=(item.current_frame+frames)%item.frames_total;
+return item.frame[item.current_frame];
+
+
+}
+// ИНДИКАТОР НАПРАВЛЕНИЯ ВЫСТРЕЛА ПРОТИВНИКА
+
+
+function indicator_damage_bullets_update(){
+
+
+let mw=mesh["ammo"].matrixWorld.elements;
+
+
+let x=mw[12]-camera_position_x;
+let z=mw[14]-camera_position_z;
+let divider=1/Math.sqrt(x*x+z*z);
+x*=divider;
+z*=divider;
+
+
+let rotation=Math.atan2(camera_2d_direction_z,camera_2d_direction_x)-Math.atan2(z,x);
+
+
+let item=indicator["damage_bullets"]["enemy_damage"]
+
+
+item.rotation=rotation;
+
+
+item.offset[0]=Math.sin(-rotation)*damage_distance;
+item.offset[1]=Math.cos(-rotation)*damage_distance;
+
+
+}
+function init_core(){
+
+
+scene.background=tex["sky"];
+
+
+tex["atlas_indicator"]=DataArrayTexture_set([tex["indicator"]]);
+
+
+atlas_set();
+
+
+texa_frames_gen("coin",atlas["coin"],4,4,16);
+texa_frames_gen("digits",atlas["digits_distance"],16,1,16);
+texa_frames_gen("digits_big",atlas["digits_big"],10,1,10);
+
+
+modules_to_resize.push(indicator_border_set);
+modules_to_resize.push(indicator_to_resize);
+indicator_border_set();
+indicators_set();
+indicator_set();
+
+
+music_effects_gen();
+sounds_effects_gen();
+sounds_volume_gen(10);
+lights_set();
+
+
+soldiers_set();
+gun_set();
+other_set();
+
+
+}
+
+
+function indicator_border_set(){
+
+
+indicator_border=[];
+indicator_border["ammo"]={left:-canvas_half_width+40,right:canvas_half_width-40,top:canvas_half_height-52,bottom:-canvas_half_height+40};
+
+
+}
+
+
+function soldiers_set(){
+
+
+mesh["soldier_attack_1"]=SkeletonUtils.clone(mesh["soldier"]);
+mesh["soldier_attack_1"].animations=mesh["soldier"].animations;
+mixer["soldier_attack_1"]=new THREE.AnimationMixer(mesh["soldier_attack_1"]);
+action["soldier_attack_1"]=THREE.AnimationUtils.subclip(mesh["soldier_attack_1"].animations[0],'attack',0,100);
+action["soldier_attack_1"]=mixer["soldier_attack_1"].clipAction(action["soldier_attack_1"]);
+action["soldier_attack_1"].time=0;
+action["soldier_attack_1"].play();
+mixers.push(mixer["soldier_attack_1"]);
+mesh["soldier_attack_1"].animations=[];
+mesh["soldier_attack_1"].scale.set(0.025,0.025,0.025);
+mesh["soldier_attack_1"].position.set(-2,0,-8);
+mesh["soldier_attack_1"].rotation.y=0;
+mesh["soldier_attack_1"].children[1].frustumCulled=false;
+mesh["soldier_attack_1"].children[1].onAfterRender=function(){
+this.frustumCulled=true;
+this.onAfterRender=function(){};
+}
+scene.add(mesh["soldier_attack_1"]);
+
+
+mesh["soldier_attack_2"]=SkeletonUtils.clone(mesh["soldier"]);
+mesh["soldier_attack_2"].animations=mesh["soldier"].animations;
+mixer["soldier_attack_2"]=new THREE.AnimationMixer(mesh["soldier_attack_2"]);
+action["soldier_attack_2"]=THREE.AnimationUtils.subclip(mesh["soldier_attack_2"].animations[0],'attack',0,100);
+action["soldier_attack_2"]=mixer["soldier_attack_2"].clipAction(action["soldier_attack_2"]);
+action["soldier_attack_2"].time=0;
+action["soldier_attack_2"].play();
+mixers.push(mixer["soldier_attack_2"]);
+mesh["soldier_attack_2"].animations=[];
+mesh["soldier_attack_2"].scale.set(0.025,0.025,0.025);
+mesh["soldier_attack_2"].position.set(2,0,-8);
+mesh["soldier_attack_2"].rotation.y=0;
+mesh["soldier_attack_2"].children[1].frustumCulled=false;
+mesh["soldier_attack_2"].children[1].onAfterRender=function(){
+this.frustumCulled=true;
+this.onAfterRender=function(){};
+}
+scene.add(mesh["soldier_attack_2"]);
+
+
+}
+
+
+function gun_set(){
+
+
+let hand;
+mesh["soldier_attack_1"].traverse(function(child){
+if(child.name=="swatRightHand"){ hand=child; }
+});
+
+
+mesh["gun"].parent=hand;
+mesh["gun"].position.set(-12,-2,3);
+mesh["gun"].scale.set(2000,2000,2000);
+mesh["gun"].rotation.set(1.57,3.3,0);
+
+
+}
+
+
+function other_set(){
+
+
+// ____________________ SPHERE ____________________
+
+
+mat["sphere"]=new THREE.MeshStandardMaterial({
+color:0xffffff,
+envMap:environment_main,
+metalness:1,
+roughness:0,
+})
+
+
+mesh["sphere"]=new THREE.Mesh(new THREE.SphereGeometry(1,32,32),mat["sphere"]);
+mesh["sphere"].position.set(-5,1,-10);
+mesh["sphere"].castShadow=true;
+mesh["sphere"].receiveShadow=true;
+scene.add(mesh["sphere"]);
+
+
+mat["wall"]=new THREE.MeshStandardMaterial({
+map:tex["wall"],bumpMap:tex["wall"],bumpScale:0.005,metalness:0.16
+})
+
+
+mesh["wall"]=new THREE.Mesh(new THREE.BoxGeometry(2,2,2),mat["wall"]);
+mesh["wall"].position.set(0,1,-10);
+mesh["wall"].castShadow=true;
+mesh["wall"].receiveShadow=true;
+scene.add(mesh["wall"]);
+
+
+mat["building"]=new THREE.MeshPhongMaterial({
+envMap:scene.background,
+reflectivity:0.005,
+map:tex["building_d"],
+bumpMap:tex["building_d"],
+bumpScale:0.005,
+specularMap:tex["building_s"],
+shininess:30
+});
+
+
+mesh["building"]=new THREE.Mesh(new THREE.BoxGeometry(21,20,14),mat["building"]);
+mesh["building"].position.set(-10,10,-20);
+mesh["building"].castShadow=true;
+mesh["building"].receiveShadow=true;
+scene.add(mesh["building"]);
+
+
+mesh["building_2"]=new THREE.Mesh(new THREE.BoxGeometry(21,20,14),mat["building"]);
+mesh["building_2"].position.set(11.0,10,-20);
+mesh["building_2"].scale.x=-1;
+mesh["building_2"].castShadow=true;
+mesh["building_2"].receiveShadow=true;
+scene.add(mesh["building_2"]);
+
+
+mat["building_3"]=new THREE.MeshPhongMaterial({
+envMap:scene.background,
+reflectivity:0.01,
+map:tex["building_3_d"],
+bumpMap:tex["building_3_d"],
+bumpScale:0.005,
+specularMap:tex["building_3_s"],
+shininess:200
+});
+
+
+mesh["building_3"]=new THREE.Mesh(new THREE.BoxGeometry(8.4,19.2,1),mat["building_3"]);
+mesh["building_3"].position.set(0.5,10.4,-12.5);
+mesh["building_3"].castShadow=true;
+mesh["building_3"].receiveShadow=true;
+scene.add(mesh["building_3"]);
+
+
+mat["asphalt"]=new THREE.MeshStandardMaterial({
+map:tex["asphalt_d"],
+bumpMap:tex["asphalt_r"],
+bumpScale:0.005,
+aoMap:tex["asphalt_ao"],
+roughnessMap:tex["asphalt_r"],
+roughness:1.0,
+metalnessMap:tex["asphalt_r"],
+metalness:1.0
+});
+
+
+mesh["ground"]=new THREE.Mesh(new THREE.BoxGeometry(100,1,100),mat["asphalt"]);
+mesh["ground"].position.set(0,-0.5,0);
+mesh["ground"].receiveShadow=true;
+scene.add(mesh["ground"]);
+
+
+}
+function meshes_frustum_visible(item,mode){
+
+
+if(mode==1){
+item.traverse(function(child){
+if(child.isMesh){
+child.last_visible=child.visible;
+child.visible=true;
+child.last_frustumCulled=child.frustumCulled;
+child.frustumCulled=false;
+}
+});
+}
+else{
+item.traverse(function(child){
+if(child.isMesh){
+child.visible=child.last_visible;
+child.frustumCulled=child.last_frustumCulled;
+delete child.last_visible;
+delete child.last_frustumCulled;
+}
+});
+}
+
+
+}
+
+
+function init_end(){
+
+
+window.addEventListener("resize",()=>{ on_window_resize(); on_window_resize(); });
+on_window_resize();
+
+
+// ПЕРВЫЙ РЕНДЕРИНГ, ЧТОБЫ ВСЁ ПОПАЛО СРАЗУ В ПАМЯТЬ И НЕ ТОРМОЗИЛО
+meshes_frustum_visible(scene,1);
+meshes_frustum_visible(scene_hud,1);
+renderer.render(scene,camera);
+renderer.render(scene_hud,camera_hud);
+meshes_frustum_visible(scene,2);
+meshes_frustum_visible(scene_hud,2);
+
+
+document.getElementById("loading").style.display="none";
+document.getElementById("begin").style.display="block";
+
+
+document.getElementById("begin").onclick=()=>{
+document.getElementById("begin").onclick=()=>{}
+document.getElementById("begin").style.display="none";
+stop=0;
+loop();
+}
+
+
+}
+let camera_position=new THREE.Vector3();
+let camera_direction=new THREE.Vector3();
+let camera_position_x=0;
+let camera_position_y=0;
+let camera_position_z=0;
+let camera_direction_x=0;
+let camera_direction_y=0;
+let camera_direction_z=0;
+let camera_2d_direction_x=0;
+let camera_2d_direction_z=0;
+let camera_lengthSq=0;
+let camera_angle_z=0;
+let camera_angle_y=0
+
+
+function camera_data_update(){
+
+
+// ЗДЕСЬ МАТРИЦА ОБНОВЛЯЕТСЯ САМА ВНУТРИ ФУНКЦИИ
+camera.getWorldPosition(camera_position);
+camera.getWorldDirection(camera_direction);
+
+
+camera_position_x=camera_position.x;
+camera_position_y=camera_position.y;
+camera_position_z=camera_position.z;
+camera_direction_x=camera_direction.x;
+camera_direction_y=camera_direction.y;
+camera_direction_z=camera_direction.z;
+
+
+camera_angle_z=90-Math.asin(camera_direction_y)*radian_to_degrees;
+camera_angle_y=180+Math.atan2(camera_direction_x,camera_direction_z)*radian_to_degrees;  
+
+
+camera_lengthSq=camera_direction_x*camera_direction_x+camera_direction_y*camera_direction_y+camera_direction_z*camera_direction_z;
+
+
+// ВЕКТОР КАМЕРЫ ДЛЯ 2D СЛУЧАЯ
+camera_2d_direction_x=camera_direction_x/Math.abs(camera_direction_y);
+camera_2d_direction_z=camera_direction_z/Math.abs(camera_direction_y);
+
+
+let divider=1/Math.sqrt(camera_2d_direction_x*camera_2d_direction_x+camera_2d_direction_z*camera_2d_direction_z);
+camera_2d_direction_x*=divider;
+camera_2d_direction_z*=divider;
+
+
+}/* 140525 1000 ЗА 0.1МС 10000 ЗА 1.2МС
+
+for(let u=0;u<1000;u++){
+indicator_area_a["abc_"+u]={offset:[200+u,100],scale:[128,64],rotation:0,color:[1,1,1,1],blend:1,frame:atlas["indicator_area_a"],texture:0};
+}
+let min=9090;
+for(let z=0;z<100;z++){
+let started=performance.now();
+indicators_update();
+let elap=performance.now()-started;
+if(min>elap){ min=elap; }
+}
+console.log(min);
+*/
+
+
+let indicator_attributes;
+
+
+function indicator_set(){
+
+
+let geometry=new THREE.InstancedBufferGeometry();
+geometry.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array([-0.5,0.5,0,-0.5,-0.5,0,0.5,0.5,0,0.5,-0.5,0,0.5,0.5,0,-0.5,-0.5,0]),3));
+geometry.setAttribute('uv',new THREE.Float32BufferAttribute(new Float32Array([0,1,0,0,1,1,1,0,1,1,0,0]),2));
+geometry.setAttribute('offset',new THREE.InstancedBufferAttribute(new Float32Array(),2));
+geometry.setAttribute('scale',new THREE.InstancedBufferAttribute(new Float32Array(),2));
+geometry.setAttribute('rotation',new THREE.InstancedBufferAttribute(new Float32Array(),1));
+geometry.setAttribute('color',new THREE.InstancedBufferAttribute(new Float32Array(),4));
+geometry.setAttribute('blend',new THREE.InstancedBufferAttribute(new Float32Array(),1));
+geometry.setAttribute('frame',new THREE.InstancedBufferAttribute(new Float32Array(),4));
+geometry.setAttribute('texture',new THREE.InstancedBufferAttribute(new Float32Array(),1));
+
+
+mat["indicator"]=new THREE.ShaderMaterial({
+uniforms:{
+map:{value:tex["atlas_indicator"]},
+},
+vertexShader:vs["indicator"],
+fragmentShader:fs["indicator"],
+glslVersion:THREE.GLSL3,
+transparent:true,
+depthTest:false,
+depthWrite:false,
+blending:THREE.CustomBlending,
+blendEquation:THREE.AddEquation,
+blendSrc:THREE.OneFactor,
+blendDst:THREE.OneMinusSrcAlphaFactor
+});
+
+
+mesh["indicator"]=new THREE.Mesh(geometry,mat["indicator"]);
+mesh["indicator"].frustumCulled=false;
+mesh["indicator"].matrixAutoUpdate=false;
+mesh["indicator"].updateMatrixWorld=function(){};
+scene_hud.add(mesh["indicator"]);
+
+
+indicator_attributes=mesh["indicator"].geometry.attributes;
+
+
+}
+
+
+function indicators_update(items){
+
+
+let values=[];
+
+
+let max=items.length;
+for(let n=0;n<max;n++){
+let max_2=items[n].length;
+// ЕСЛИ БЕЗ КЛЮЧА
+if(max_2){
+for(let k=0;k<max_2;k++){
+values.push(items[n][k]);
+}	
+}
+else{
+// ЕСЛИ С КЛЮЧОМ	
+for(let i in items[n]){
+values.push(items[n][i]);
+}
+}
+}
+
+
+let count=values.length;
+
+
+let offset=new Float32Array(count*2);
+let scale=new Float32Array(count*2);
+let rotation=new Float32Array(count);
+let color=new Float32Array(count*4);
+let blend=new Float32Array(count);
+let frame=new Float32Array(count*4);
+let texture=new Float32Array(count);
+
+
+let n=count;
+
+
+while(n--){
+
+
+// ОДНО ЗНАЧЕНИЕ
+let item=values[n];
+rotation[n]=item.rotation;
+texture[n]=item.texture;
+blend[n]=item.blend;
+
+
+// ДВА ЗНАЧЕНИЯ
+let i0=n*2;
+let i1=i0+1;
+let i=item.scale;
+scale[i0]=i[0];
+scale[i1]=i[1];
+i=item.offset;
+offset[i0]=i[0];
+offset[i1]=i[1];
+
+
+// ЧЕТЫРЕ ЗНАЧЕНИЯ
+i0=n*4;
+i1=i0+1;
+let i2=i0+2;
+let i3=i0+3;
+i=item.color;
+color[i0]=i[0];
+color[i1]=i[1];
+color[i2]=i[2];
+color[i3]=i[3];
+i=item.frame;
+frame[i0]=i[0];
+frame[i1]=i[1];
+frame[i2]=i[2];
+frame[i3]=i[3];
+
+
+}
+
+
+// УСТАНАВЛИВАЕМ ДИНАМИЧНОСТЬ, ЧТОБЫ НЕ БЫЛО СКАЧКОВ FPS ПРИ УДАЛЕНИИ МУСОРА В ОЗУ
+
+
+indicator_attributes.offset=new THREE.InstancedBufferAttribute(offset,2).setUsage(THREE.StreamDrawUsage);
+indicator_attributes.scale=new THREE.InstancedBufferAttribute(scale,2).setUsage(THREE.StreamDrawUsage);
+indicator_attributes.rotation=new THREE.InstancedBufferAttribute(rotation,1).setUsage(THREE.StreamDrawUsage);
+indicator_attributes.color=new THREE.InstancedBufferAttribute(color,4).setUsage(THREE.StreamDrawUsage);
+indicator_attributes.blend=new THREE.InstancedBufferAttribute(blend,1).setUsage(THREE.StreamDrawUsage);
+indicator_attributes.frame=new THREE.InstancedBufferAttribute(frame,4).setUsage(THREE.StreamDrawUsage);
+indicator_attributes.texture=new THREE.InstancedBufferAttribute(texture,1).setUsage(THREE.StreamDrawUsage);
+
+
+// ТАК КАК ДИНАМИЧЕСКИЙ ВАРИАНТ, ТО НЕОБХОДИМО УКАЗЫВАТЬ КОЛИЧЕСТВО
+
+
+mesh["indicator"].geometry._maxInstanceCount=count;
+
+
+}
+
+
+function indicator_get_screen(item){
+	
+
+let object_mw=item.object_mw;
+
+
+// ОПРЕДЕЛЯЕМ ПОЗИЦИЮ С УЧЁТОМ СМЕЩЕНИЯ
+let position_origin_x=object_mw[12]+item.offset_x;
+let position_origin_y=object_mw[13]+item.offset_y;
+let position_origin_z=object_mw[14]+item.offset_z;
+
+
+// ПОЗИЦИЯ ОБЪЕКТА
+let target_position_x=position_origin_x;
+let target_position_y=position_origin_y;
+let target_position_z=position_origin_z;
+
+
+// ВЫЧИСЛЯЕМ ВЕКТОР НАПРАВЛЕНИЯ
+let direction_x=target_position_x-camera_position_x;
+let direction_y=target_position_y-camera_position_y;
+let direction_z=target_position_z-camera_position_z;
+
+
+// ВЫЧИСЛЯЕМ УГОЛ В РАДИАНАХ МЕЖДУ ВЕКТОРАМИ
+// УПРОЩЁННАЯ ФУНКЦИЯ new THREE.Vector3(direction_x,direction_y,direction_z).angleTo(camera.getWorldDirection()).
+let denominator=Math.sqrt((direction_x*direction_x+direction_y*direction_y+direction_z*direction_z)*camera_lengthSq);
+let angleTo;
+if(denominator===0){ angleTo=PI_half; }
+else{
+let theta=(direction_x*camera_direction_x+direction_y*camera_direction_y+direction_z*camera_direction_z)/denominator;
+angleTo=Math.acos(Math.max(-1,Math.min(1,theta)));
+}
+
+
+// ОБЪЕКТ ВПЕРЕДИ КАМЕРЫ
+let side=1;
+// ОБЪЕКТ ПОЗАДИ КАМЕРЫ
+if(angleTo>PI_half){ side=-1; }
+
+
+// ПРОЕКЦИЯ НА КАМЕРУ
+vector3.set(target_position_x,target_position_y,target_position_z).project(camera);
+target_position_x=vector3.x;
+target_position_y=vector3.y;
+target_position_z=vector3.z;
+
+
+// НАХОДИМ КООРДИНАТЫ ИНДИКАТОРА НА ЭКРАНЕ И УГОЛ ПОВОРОТА К НЕМУ ОТ ЦЕНТРА ЭКРАНА
+
+
+// ДЛЯ CSS ЭЛЕМЕНТА
+/*
+let screen_x=(0.5+target_position_x/2)*(screen_width/pixel_ratio_origin);
+let screen_y=(0.5-target_position_y/2)*(screen_height/pixel_ratio_origin);
+document.getElementById("annotation").style.left=screen_x+"px";
+document.getElementById("annotation").style.top=screen_y+"px";
+*/
+
+
+let screen_x=side*target_position_x*canvas_half_width;
+let screen_y=side*target_position_y*canvas_half_height;
+let rotation=-Math.atan2(screen_x,screen_y);	
+
+
+// ПОЗАДИ КАМЕРЫ ИЛИ ВНЕ ПОЛЯ ЗРЕНИЯ
+if(side==-1 || Math.abs(target_position_x)>1 || Math.abs(target_position_y)>1){
+// НАХОДИМ МИНИМАЛЬНОЕ РАССТОЯНИЕ МЕЖДУ РАССТОЯНИЕМ ПО ШИРИНЕ И РАССТОЯНИЕ ПО ВЫСОТУ ДО ЦЕЛИ
+let distance=Math.min(Math.abs(((canvas_half_width))/Math.cos((PI_half)-rotation)),Math.abs(((canvas_half_height))/Math.cos(-rotation)));
+// ВОЗВРАЩАЕМ ИНДИКАТОР В ПОЛЕ ЗРЕНИЯ КАМЕРЫ
+// УПРОЩЁННАЯ ФУНКЦИЯ new THREE.Vector3(screen_x,screen_y,0).setLength(dist)
+let divider=1/Math.sqrt(screen_x*screen_x+screen_y*screen_y)*distance;
+screen_x*=divider;
+screen_y*=divider;
+}
+
+
+let screen_origin_x=screen_x;
+let screen_origin_y=screen_y;
+let in_screen=1;
+let border=indicator_border[item.name];
+
+
+// ВОЗВРАЩАЕМ ИНДИКАТОР В ОБОЗНАЧЕННЫЕ ПОЗИЦИИ
+if(screen_x<border.left){ in_screen=0; screen_x=border.left; }
+if(screen_x>border.right){ in_screen=0; screen_x=border.right; }
+if(screen_y>border.top){ in_screen=0; screen_y=border.top; }
+if(screen_y<border.bottom){ in_screen=0; screen_y=border.bottom; }
+
+
+// НУЖЕН ДЛЯ ОТКЛАДЫВАНИЯ ПОЗИЦИИ
+let divider=1/Math.sqrt(screen_x*screen_x+screen_y*screen_y);
+
+
+return [position_origin_x,position_origin_y,position_origin_z,in_screen,screen_origin_x,screen_origin_y,screen_x,screen_y,rotation,divider];
+	
+	
+}let indicator=[]; // ИНДИКАТОРЫ
+let indicator_border=[]; // ОТСТУПЫ ИНДИКАТОРОВ
+
+
+indicator["ammo_data"]=[];
+indicator["area"]=[];
+indicator["coin"]=[];
+indicator["player"]=[];
+indicator["player_stat"]=[];
+indicator["ammmo"]=[];
+indicator["damage_bullets"]=[];
+
+
+let damage_distance=200;
+let blend=1;
+let damage_count=8;
+let p=6.28/damage_count;
+
+
+function indicator_to_resize(){
+
+
+indicator["player"]["test_left"]={offset:[-canvas_half_width+60,-canvas_half_height+20],scale:[100,20],rotation:0,color:[1,0.7,0,0.8],blend:1,frame:atlas["color"][0],texture:atlas["color"][1]};
+
+
+indicator["player"]["health_bg"]={offset:[canvas_half_width-150,-canvas_half_height+120],scale:[248,38],rotation:0,color:[1,1,1,0.2],blend:1,frame:atlas["color"][0],texture:atlas["color"][1]};
+indicator["player"]["health_color"]={offset:[canvas_half_width-150,-canvas_half_height+120],scale:[240,30],rotation:0,color:[1.2*0.55,1.2*0.73,1.2*0.25,0.9],blend:1,frame:atlas["color"][0],texture:atlas["color"][1]};
+
+
+indicator["player"]["water_bg"]={offset:[canvas_half_width-150,-canvas_half_height+80],scale:[248,38],rotation:0,color:[1,1,1,0.2],blend:1,frame:atlas["color"][0],texture:atlas["color"][1]};
+indicator["player"]["water_color"]={offset:[canvas_half_width-150,-canvas_half_height+80],scale:[240,30],rotation:0,color:[1.2*0.29,1.2*0.57,1.2*0.78,0.9],blend:1,frame:atlas["color"][0],texture:atlas["color"][1]};
+
+
+indicator["player"]["food_bg"]={offset:[canvas_half_width-150,-canvas_half_height+40],scale:[248,38],rotation:0,color:[1,1,1,0.2],blend:1,frame:atlas["color"][0],texture:atlas["color"][1]};
+indicator["player"]["food_color"]={offset:[canvas_half_width-150,-canvas_half_height+40],scale:[240,30],rotation:0,color:[1.2*0.76,1.2*0.43,1.2*0.2,0.9],blend:1,frame:atlas["color"][0],texture:atlas["color"][1]};
+
+
+}
+
+
+function indicators_set(){
+
+
+indicator["damage_bullets"]["enemy_damage"]={type:0,time:1000,offset:[328,200],scale:[128,32],rotation:0,color:[1,1,1,1],blend:1,frame:atlas["damage"][0],texture:atlas["damage"][1]};
+
+
+indicator["area"]["a"]={offset:[200,100],scale:[44,44],rotation:0,color:[1,1,1,1],blend:1,frame:atlas["area_a"][0],texture:atlas["area_a"][1]};
+indicator["area"]["b"]={offset:[264,100],scale:[44,44],rotation:0,color:[1,1,1,1],blend:1,frame:atlas["area_b"][0],texture:atlas["area_b"][1]};
+indicator["area"]["c"]={offset:[328,100],scale:[44,44],rotation:0,color:[1,1,1,1],blend:1,frame:atlas["area_c"][0],texture:atlas["area_c"][1]};
+indicator["area"]["d"]={offset:[392,100],scale:[44,44],rotation:0,color:[1,1,1,1],blend:1,frame:atlas["area_d"][0],texture:atlas["area_d"][1]};
+
+
+for(let n=0;n<damage_count;n++){
+let rot=n*p;
+let x=Math.sin(-rot)*damage_distance;
+let y=Math.cos(-rot)*damage_distance;
+indicator["area"]["damage_"+n]={offset:[x,y],scale:[128,32],rotation:rot,color:[1,0,0,1],blend:blend,frame:atlas["damage"][0],texture:atlas["damage"][1]};
+}
+
+
+texa_gen("coin_clone","coin",0.06,0);
+
+
+indicator["coin"]["coin_clone_1"]={type:0,time:1000,offset:[328,260],scale:[32,32],rotation:0,color:[1,1,1,1],blend:1,frame:texa["coin_clone"].frame[0],texture:atlas["coin_clone"][1]};
+indicator["coin"]["coin_clone_2"]={type:0,time:1000,offset:[360,260],scale:[32,32],rotation:0,color:[1,1,1,1],blend:1,frame:texa["coin_clone"].frame[0],texture:atlas["coin_clone"][1]};
+indicator["coin"]["coin_clone_3"]={type:0,time:1000,offset:[392,260],scale:[32,32],rotation:0,color:[1,1,1,1],blend:1,frame:texa["coin_clone"].frame[0],texture:atlas["coin_clone"][1]};
+
+
+indicator["coin"]["coin_1"]={type:0,time:1000,offset:[328,300],scale:[32,32],rotation:0,color:[1,1,1,1],blend:1,frame:texa_set("coin_1","coin",0.032,0),texture:atlas["coin_clone"][1]};
+indicator["coin"]["coin_2"]={type:0,time:1000,offset:[380,300],scale:[32,32],rotation:0,color:[1,1,1,1],blend:1,frame:texa_set("coin_2","coin",0.032,0),texture:atlas["coin_clone"][1]};
+indicator["coin"]["coin_3"]={type:0,time:1000,offset:[560,320],scale:[64,64],rotation:0,color:[1,1,1,1],blend:1,frame:texa_set("coin_3","coin",0.62,0,1),texture:atlas["coin_clone"][1]};
+
+
+indicator["coin"]["coin_4"]={type:0,time:1000,offset:[450,220],scale:[32,32],rotation:0,color:[1,1,1,1],blend:1,frame:texa_set("coin_4","coin",0.01,0,30),texture:atlas["coin_clone"][1]};
+
+
+}
+
+
+function indicator_player_update(){
+
+
+indicator["player_stat"]=[];
+
+
+let digits=[...(player.health).toString()];
+let max=digits.length;
+let left=canvas_half_width-254;
+let top=-canvas_half_height+120;
+for(let n=0;n<max;n++){
+indicator["player_stat"].push({offset:[left+n*9,top],scale:[16,16],rotation:0,color:[1,1,1,0.8],blend:1,frame:texa_frames["digits_big"][digits[n]],texture:atlas["digits_big"][1]});
+}
+
+
+digits=[...(player.water).toString()];
+max=digits.length;
+left=canvas_half_width-254;
+top=-canvas_half_height+80;
+for(let n=0;n<max;n++){
+indicator["player_stat"].push({offset:[left+n*9,top],scale:[16,16],rotation:0,color:[1,1,1,0.8],blend:1,frame:texa_frames["digits_big"][digits[n]],texture:atlas["digits_big"][1]});
+}
+
+
+digits=[...(player.food).toString()];
+max=digits.length;
+left=canvas_half_width-254;
+top=-canvas_half_height+40;
+for(let n=0;n<max;n++){
+indicator["player_stat"].push({offset:[left+n*9,top],scale:[16,16],rotation:0,color:[1,1,1,0.8],blend:1,frame:texa_frames["digits_big"][digits[n]],texture:atlas["digits_big"][1]});
+}
+
+
+}
+
+
+function indicator_ammo_update(){
+
+
+indicator["ammo"]=[];
+
+
+for(let n in indicator["ammo_data"]){
+
+
+let item=indicator["ammo_data"][n];
+
+
+// ОБНОВЛЯЕМ МАТРИЦЫ ИНДИКАТОРОВ ДО РЕНДЕРИНГА, ЧТОБЫ НЕ ДЁРГАЛИСЬ
+item.object.updateMatrixWorld();
+
+
+// ПОЗИЦИЯ НА ЭКРАНЕ
+let [position_origin_x,position_origin_y,position_origin_z,in_screen,screen_origin_x,screen_origin_y,screen_x,screen_y,rotation,divider]=indicator_get_screen(item);
+
+
+// ПАТРОНЫ
+indicator["ammo"].push({offset:[screen_x,screen_y],scale:[44,44],rotation:0,color:[1,1,1,1],blend:1,frame:atlas["ammo"][0],texture:atlas["ammo"][1]});
+
+
+// СТРЕЛКА В ЗОНЕ
+if(in_screen){
+indicator["ammo"].push({offset:[screen_x*divider*100,screen_y*divider*100],scale:[16,16],rotation:rotation,color:[1,1,1,1],blend:1,frame:atlas["arrow"][0],texture:atlas["arrow"][1]});
+}
+// СТРЕЛКА ВНЕ ЗОНЫ
+else{
+let rotation=-Math.atan2(screen_origin_x-screen_x,screen_origin_y-screen_y);
+indicator["ammo"].push({offset:[screen_x-Math.sin(rotation)*30,screen_y+Math.cos(-rotation)*30],scale:[16,16],rotation:rotation,color:[1,1,1,1],blend:1,frame:atlas["arrow"][0],texture:atlas["arrow"][1]});
+}
+
+
+// ДИСТАНЦИЯ
+let distance=Math.floor(-item.radius+Math.sqrt(Math.pow(position_origin_x-camera_position_x,2)+Math.pow(position_origin_y-camera_position_y,2)+Math.pow(position_origin_z-camera_position_z,2)));
+// ОБХОДИМ ОШИБКУ, КОГДА НАХОДИМСЯ ВНУТРИ РАДИУСА И ДИСТАНЦИЯ СТАНОВИТСЯ ОТРИЦАТЕЛЬНОЙ
+distance=Math.max(distance,0);
+let digits=[...(distance).toString()];
+let max=digits.length;
+let left=screen_x-max*8/2;
+for(let n=0;n<max;n++){
+indicator["ammo"].push({offset:[left+n*8,screen_y+42],scale:[16,16],rotation:0,color:[1,1,1,1],blend:1,frame:texa_frames["digits"][digits[n]],texture:atlas["digits"][1]});
+}
+indicator["ammo"].push({offset:[left+max*8,screen_y+42],scale:[16,16],rotation:0,color:[1,1,1,1],blend:1,frame:texa_frames["digits"][10],texture:atlas["digits"][1]});
+
+
+}
+
+
+}
+
+
+function indicators_calculations(){
+
+
+// ОДНОРАЗОВАЯ АНИМАЦИЯ. СПЕРВА ИДЁТ АНИМАЦИЯ, А ЗАТЕМ ТОЛЬКО СОЗДАНИЕ ИНДИКАТОРА, ЧТОБЫ ОТОБРАЗИЛСЯ ПЕРВЫЙ КАДР
+
+
+let name="coin_3";
+if(texa[name]){
+if(texa_once(texa[name])){
+indicator["coin"][name].frame=texa[name].frame[texa[name].current_frame];
+}
+else{
+delete texa[name];
+delete indicator["coin"][name];
+}
+}
+	
+
+// МНОГОРАЗОВАЯ АНИМАЦИЯ. СПЕРВА ИДЁТ АНИМАЦИЯ, А ЗАТЕМ ТОЛЬКО СОЗДАНИЕ ИНДИКАТОРА, ЧТОБЫ ОТОБРАЗИЛСЯ ПЕРВЫЙ КАДР
+
+
+if(texa["coin_4"]){
+if(texa_repeats(texa["coin_4"])){
+indicator["coin"]["coin_4"].frame=texa["coin_4"].frame[texa["coin_4"].current_frame];
+}
+else{
+delete texa["coin_4"];
+delete indicator["coin"]["coin_4"];	
+}
+}
+
+	
+// ДЛЯ БЕСКОНЕЧНЫХ АНИМАЦИЙ
+indicator["coin"]["coin_1"].frame=texa_loop(texa["coin_1"]);
+indicator["coin"]["coin_2"].frame=texa_loop(texa["coin_2"]);
+
+
+// ДЛЯ КЛОНОВ КОПИРУЕМ АНИМАЦИЮ
+let item=texa_loop(texa["coin_clone"]);
+indicator["coin"]["coin_clone_1"].frame=item;
+indicator["coin"]["coin_clone_2"].frame=item;
+indicator["coin"]["coin_clone_3"].frame=item;
+
+
+indicator_ammo_update();
+indicator_player_update();
+indicator_damage_bullets_update();
+indicators_update([indicator["area"],indicator["coin"],indicator["ammo"],indicator["damage_bullets"],indicator["player"],indicator["player_stat"]]);	
+	
+	
+}function lights_set(){
+
+
+// ____________________ СВЕТ ОКРУЖЕНИЯ ____________________
+
+
+let ambient=new THREE.AmbientLight(0xfffff0,0.2);
+//scene.add(ambient);
+
+
+// ____________________ ТУМАН ____________________
+
+
+//scene.fog=new THREE.FogExp2(0x8A7E9B,2);
+
+
+// ____________________ СВЕТ СОЛНЦА ____________________
+
+
+let sun=new THREE.DirectionalLight(0xFEEFC2,5);
+sun.position.set(40,100,40);
+sun.castShadow=true;
+sun.shadow.mapSize.width=2048;
+sun.shadow.mapSize.height=2048;
+sun.shadow.camera.near=1;
+sun.shadow.camera.far=200;
+sun.shadow.camera.left=-50;
+sun.shadow.camera.right=50;
+sun.shadow.camera.top=50;
+sun.shadow.camera.bottom=-50;
+sun.shadow.bias=-0.0004;
+//sun.shadow.radius=3;
+scene.add(sun);
+
+
+scene.add(new THREE.DirectionalLightHelper(sun,100));
+let helper = new THREE.CameraHelper(sun.shadow.camera);
+scene.add(helper);
+
+
+// ____________________ ПОЛУСВЕТ ____________________
+
+
+
+
+
+const hemiLight = new THREE.HemisphereLight(0xFEEFC2,0x444444,3);
+hemiLight.position.set(0,2,0);
+scene.add(hemiLight);
+
+
+let hemiLightHelper=new THREE.HemisphereLightHelper(hemiLight,0.2);
+scene.add(hemiLightHelper);
+
+
+}
+"use strict"
+
+
+let sounds_list=[
+
+
+// ____________________ ЭФФЕКТЫ ____________________
+
+
+//["name","./sounds/effects/name.mp3"],
+
+
+// ____________________ МЕНЮ ____________________
+
+
+//["name","./sounds/menu/name.mp3"],
+
+
+// ____________________ МУЗЫКА ____________________
+
+
+//["name","./sounds/music/name.mp3"],
+
+
+// ____________________ ЗВУКИ ____________________
+
+
+//["name","./sounds/sounds/name.mp3"],
+
+
+];
+"use strict"
+
+
+//____________________ ЗАГРУЗЧИК ТЕКСТУР И МОДЕЛЕЙ ____________________
+
+
+let loader_textures_show=1; // 0 - НЕ ОТОБРАЖАТЬ СПИСОК ТЕКСТУР В КОНСОЛЕ, 1 - ОТОБРАЖАТЬ
+let loader_models_show=1; // 0 - НЕ ОТОБРАЖАТЬ СПИСОК МОДЕЛЕЙ В КОНСОЛЕ, 1 - ОТОБРАЖАТЬ
+let loader_sounds_show=1; // 0 - НЕ ОТОБРАЖАТЬ СПИСОК ЗВУКОВ В КОНСОЛЕ, 1 - ОТОБРАЖАТЬ
+
+
+let loader_total=0; // СКОЛЬКО НАДО ЗАГРУЗИТЬ
+let loader_loaded=0; // СКОЛЬКО ЗАГРУЖЕНО
+let loader_textures_loaded=0; // СКОЛЬКО ЗАГРУЖЕНО ТЕКСТУР
+let loader_models_loaded=0; // СКОЛЬКО ЗАГРУЖЕНО МОДЕЛЕЙ
+let loader_sounds_loaded=0; // СКОЛЬКО ЗАГРУЖЕНО ЗВУКОВ
+let loader_errors=0; // 0 - НЕТ ОШИБОК, 1 - ЕСТЬ
+
+
+//____________________ МЕНЕДЖЕР ЗАГРУЗОК ____________________
+
+
+let loadingManager=new THREE.LoadingManager();
+
+
+loadingManager.onError=function(item,loaded,total){
+loader_errors=1;
+console.log("%c"+item,"font-weight:bold;color:#ff0000");
+loadingManager=function(){};
+}
+
+
+//____________________ СЧЁТЧИК ЗАГРУЗОК ____________________
+
+
+loadingManager.itemStart=function(item){
+loader_total++;
+}
+
+
+loadingManager.onProgress=function(item,loaded,total){
+
+
+let found=0;
+
+
+if(item.match(/(\.jpe?g($|\?)|\.png($|\?)|\.gif($|\?)|\.bmp($|\?)|\.dds($|\?)|\.hdr($|\?))/gi)){
+found=1;
+loader_textures_loaded++;
+if(loader_textures_show){ console.log("%c"+item,"font-weight:bold;color:#004090"); }
+}
+
+
+if(item.match(/(\.obj($|\?)|\.fbx($|\?)|\.gltf($|\?)|\.glb($|\?)|\.bin($|\?))/gi)){
+found=1;
+loader_models_loaded++;
+if(loader_models_show){ console.log("%c"+item,"font-weight:bold;color:#448A44"); }
+}
+
+
+if(item.match(/(\.ogg($|\?)|\.mp3($|\?)|\.wav($|\?))/gi)){
+found=1;
+loader_sounds_loaded++;
+if(loader_sounds_show){ console.log("%c"+item,"font-weight:bold;color:#A73CEE"); }
+}
+
+
+if(found==0){ console.log("%c ДОБАВИТЬ ФОРМАТ ЭТОГО ФАЙЛА: "+item+" ","background:#ff0000;color:#ffffff"); return; }
+
+
+loader_loaded++;
+
+
+};
+
+
+//____________________ ЗАПУСКАЕМ ПРОВЕРКУ ЗАГРУЗКИ ФАЙЛОВ, КОГДА СТРАНИЦА ЗАГРУЗИТСЯ ПОЛНОСТЬЮ ____________________
+
+
+document.addEventListener("DOMContentLoaded",()=>{
+loader_check();
+});
+
+
+//____________________ ПРОВЕРКА ЗАГРУЗКИ ФАЙЛОВ ____________________
+
+
+function loader_check(){
+
+
+document.getElementById("loading_amount").innerHTML=loader_loaded+"/"+loader_total;
+
+
+if(loader_total==loader_loaded){
+if(loader_errors){ document.getElementById("loading").innerHTML="Loading error"; }
+else{
+console.log("%c ТЕКСТУР: "+loader_textures_loaded+" ","background:#222;font-weight:bold;color:#bada55");
+console.log("%c МОДЕЛЕЙ: "+loader_models_loaded+" ","background:#222;font-weight:bold;color:#bada55");
+console.log("%c ЗВУКОВ: "+loader_sounds_loaded+" ","background:#222;font-weight:bold;color:#bada55");
+console.log("%c ВСЕГО: "+loader_total+" ","background:#222;font-weight:bold;color:#bada55");
+console.log("%c --> ВСЁ ЗАГРУЖЕНО <-- ","background:#222;font-weight:bold;color:#bada55;");
+setTimeout(()=>{ init_core(); init_end(); },100);
+}
+return;
+}
+
+
+requestAnimationFrame(loader_check);
+
+
+}
+
+
+//____________________ ЗВУКИ ____________________
+
+
+let sounds_total=sounds_list.length;
+
+
+//____________________ ЗАГРУЗЧИК ЗВУКОВ ____________________
+
+
+const sounds_loader=new THREE.FileLoader(loadingManager);
+sounds_loader.setResponseType("arraybuffer");
+
+
+for(let n=0;n<sounds_total;n++){
+
+
+sounds_loader.load(sounds_list[n][1],function(buffer){
+try{
+const bufferCopy=buffer.slice(0);
+sounds_context.decodeAudioData(bufferCopy,function(decoded_buffer){
+sound[sounds_list[n][0]]=decoded_buffer;
+});
+}
+catch(e){}
+});
+
+
+}
+let project=document.getElementById("project");
+let canvas=document.getElementById("canvas");
+let canvas_hud=document.getElementById("canvas_hud");
+let screen_width=project.offsetWidth;
+let screen_height=project.offsetHeight;
+let canvas_half_width=screen_width/2;
+let canvas_half_height=screen_height/2;
+let screen_resolution=[screen_width,screen_height];
+let screen_aspect_ratio=screen_width/screen_height;
+let screen_texel_size=[1.0/screen_width,1.0/screen_height];
+let pixel_ratio_origin=Math.min(window.devicePixelRatio,1); // ВЫБИРАЕМ ЗНАЧЕНИЕ <=1, Т.К. НА ТЕЛЕФОНЕ ЛУЧШЕ НЕ БОЛЕЕ 1
+let pixel_ratio_quality=1;
+let renderer_pixel_ratio=pixel_ratio_origin/pixel_ratio_quality;
+
+
+let vs=[]; // ВЕРТЕКСНЫЙ ШЕЙДЕР
+let fs=[]; // ФРАГМЕНТНЫЙ ШЕЙДЕР
+let mat=[];
+let mesh=[];
+let helper=[];
+let dummy=[]; // OBJECT3D(); ДЛЯ ПОВОРОТОВ, ВЕКТОРОВ
+let uniforms=[]; // ЮНИФОРМЫ СВОИХ ШЕЙДЕРОВ ДЛЯ БЫСТРОГО ДОСТУПА
+let modules_to_resize=[]; // МОДУЛИ, ОБНОВЛЯЕМЫЕ ПРИ ИЗМЕНЕНИИ РАЗМЕРА ЭКРАНА
+let mixers=[];
+let mixer=[];
+let action=[];
+let atlas=[]; // ТЕКСТУРЫ АТЛАСОВ
+let environment_main;
+
+
+let degrees_to_radian=Math.PI/180;
+let radian_to_degrees=180/Math.PI;
+let PI_half=Math.PI/2;
+let PI=Math.PI;
+let PI_3=Math.PI*1.5;
+let PI_2=Math.PI*2;
+
+
+let vector3=new THREE.Vector3();
+
+
+let player={};
+player.health=100;
+player.water=75;
+player.food=92;
+
+
+let clock=new THREE.Clock();
+clock.autoStart=true;
+let stop=1; // СТОП И ЗАПУСК ФУНКЦИИ loop();
+let delta=0;
+
+
+let stats=new Stats();
+project.appendChild(stats.dom);
+
+
+project.appendChild(renderer_stats_canvas);
+
+
+loadingManager.init_core=init_core;
+loadingManager.init_end=init_end;
+
+
+// ____________________ ЗАКРЕПЛЕНИЕ КУРСОРА МЫШКИ ____________________
+
+
+document.addEventListener("fullscreenchange",()=>{
+if(document.fullscreenElement && document.body.requestPointerLock){ document.body.requestPointerLock(); } 
+});
+
+
+// ____________________ ПОЛНЫЙ ЭКРАН____________________
+
+
+function fullscreen_pointerlock(){
+if(!document.fullscreenElement){ document.documentElement.requestFullscreen(); }
+}
+
+
+// ____________________ УПРАВЛЕНИЕ МЫШКОЙ ____________________
+
+
+document.addEventListener("mousemove",(event)=>{
+if(document.pointerLockElement===document.body){ updatePosition(event); }
+});
+
+
+let renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true,alpha:true,premultipliedAlpha:true,logarithmicDepthBuffer:false});
+renderer.setClearColor(0x000000,0); // ЦВЕТ И ПРОЗРАЧНОСТЬ ФОНА (alpha). 0 - НЕ ПРОЗРАЧНЫЙ, 1 - ПРОЗРАЧНЫЙ
+renderer.setSize(screen_width,screen_height);
+renderer.setPixelRatio(renderer_pixel_ratio);
+renderer.autoClear=false;
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.VSMShadowMap;
+
+
+let renderer_hud=new THREE.WebGLRenderer({canvas:canvas_hud,antialias:true,alpha:true,premultipliedAlpha:true,logarithmicDepthBuffer:false});
+renderer_hud.setClearColor(0x000000,0); // ЦВЕТ И ПРОЗРАЧНОСТЬ ФОНА (alpha). 0 - НЕ ПРОЗРАЧНЫЙ, 1 - ПРОЗРАЧНЫЙ
+renderer_hud.setSize(screen_width,screen_height);
+renderer_hud.setPixelRatio(pixel_ratio_origin);
+
+
+let gpuPanel;
+window.gpuPanel=gpuPanel=new GPUStatsPanel(renderer.getContext());
+window.gpuPanel_shader_name=""; // ДЛЯ ЗАМЕРА ВРЕМЕНИ ПОСТЭФФЕКТОВ
+stats.addPanel(gpuPanel);
+
+
+let scene=new THREE.Scene();
+let scene_hud=new THREE.Scene();
+
+
+let camera=new THREE.PerspectiveCamera(60,screen_width/screen_height,0.05,10000);
+camera.position.set(0,1,0);
+
+
+let camera_hud=new THREE.OrthographicCamera(screen_width/-2,screen_width/2,screen_height/2,screen_height/-2,-1,1000000);
+// ОТОДВИГАЕМ ПО Z, ЧТОБЫ ЛЮБЫЕ ДАЛЬНИЕ ОБЪЕКТЫ ПОПАЛИ В ПОЛЕ ЗРЕНИЯ
+camera_hud.position.z=100000;
+
+
+let controls=new FirstPersonControls(camera,renderer_hud.domElement);
+controls.movementSpeed=10;
+controls.lookSpeed=0.2;
+controls.lookVertical=true;
+controls.lon=-1.5*180/Math.PI;
+
+
+function on_window_resize(){
+
+
+screen_width=project.offsetWidth;
+screen_height=project.offsetHeight;
+canvas_half_width=screen_width/2;
+canvas_half_height=screen_height/2;
+screen_resolution=[screen_width/pixel_ratio_quality,screen_height/pixel_ratio_quality];
+screen_aspect_ratio=screen_width/screen_height;
+screen_texel_size=[1.0/(screen_width*renderer_pixel_ratio),1.0/(screen_height*renderer_pixel_ratio)];
+
+
+camera.aspect=screen_aspect_ratio;
+camera.updateProjectionMatrix();
+
+
+camera_hud.left=screen_width/-2;
+camera_hud.right=screen_width/2;
+camera_hud.top=screen_height/2;
+camera_hud.bottom=screen_height/-2;
+camera_hud.updateProjectionMatrix();
+
+
+renderer.setSize(screen_width,screen_height);
+renderer_hud.setSize(screen_width,screen_height);
+
+
+controls.handleResize();
+
+
+let max=modules_to_resize.length;
+for(let n=0;n<max;n++){
+modules_to_resize[n]();
+}
+
+
+}vs["indicator"]=`
+
+
+attribute vec2 offset;
+attribute vec2 scale;
+attribute float rotation;
+attribute vec4 color;
+attribute float blend;
+attribute vec4 frame;
+attribute float texture;
+varying vec2 vUv;
+varying vec4 vColor;
+varying float vBlend;
+varying vec4 vFrame;
+varying float tex_num;
+
+
+void main(){
+
+
+float angle=rotation;
+
+
+vec3 vPosition=vec3(position.x*scale.x*cos(angle)-position.y*scale.y*sin(angle),position.y*scale.y*cos(angle)+position.x*scale.x*sin(angle),position.z);
+vPosition.x+=offset.x;
+vPosition.y+=offset.y;
+
+
+vUv=uv;
+vColor=color;
+vBlend=blend;
+tex_num=texture;
+vFrame=frame;
+
+
+// БЕЗ modelViewMatrix
+gl_Position=projectionMatrix*vec4(vPosition,1.0);
+
+
+}
+
+
+`;
+
+
+fs["indicator"]=`
+
+
+uniform sampler2DArray map;
+varying vec2 vUv;
+varying vec4 vColor;
+varying float vBlend;
+varying vec4 vFrame;
+varying float tex_num;
+out vec4 outColor;
+
+
+void main(){
+
+
+outColor=texture(map,vec3(vUv/vFrame.xy+vFrame.zw,tex_num))*vColor;
+
+
+outColor.rgb*=outColor.a; // ДЛЯ ПРАВИЛЬНОГО ОТОБРАЖЕНИЯ
+outColor.a*=vBlend; // ЧЕМ МЕНЬШЕ, ТЕМ БОЛЬШЕ ADDITIVE. ЧЕМ ВЫШЕ, ТЕМ ГУЩЕ
+
+
+}
+
+
+`;
+let tex=[];
+let texture_loader=new THREE.TextureLoader(loadingManager);
+
+
+tex["sky"]=new THREE.CubeTextureLoader(loadingManager).setPath("./textures/sky/").load(["lf.jpg","rt.jpg","up.jpg","dn.jpg","ft.jpg","bk.jpg"]);
+environment_main=tex["sky"];
+
+
+tex["wall"]=texture_loader.load("./textures/wall.jpg");
+tex["wall"].colorSpace=THREE.SRGBColorSpace;
+tex["building_d"]=texture_loader.load("./textures/building_d.jpg");
+tex["building_d"].colorSpace=THREE.SRGBColorSpace;
+tex["building_s"]=texture_loader.load("./textures/building_s.png");
+tex["building_3_d"]=texture_loader.load("./textures/building_3_d.jpg");
+tex["building_3_d"].colorSpace=THREE.SRGBColorSpace;
+tex["building_3_d"].wrapS=tex["building_3_d"].wrapT=THREE.RepeatWrapping;
+tex["building_3_d"].repeat.set(2,1);
+tex["building_3_s"]=texture_loader.load("./textures/building_3_s.png");
+tex["building_3_s"].wrapS=tex["building_3_s"].wrapT=THREE.RepeatWrapping;
+tex["building_3_s"].repeat.set(2,1);
+
+
+tex["cell"]=texture_loader.load("./textures/cell.jpg");
+tex["cell"].colorSpace=THREE.SRGBColorSpace;
+tex["cell"].wrapS=tex["cell"].wrapT=THREE.RepeatWrapping;
+tex["cell"].repeat.set(40,40);
+
+
+tex["asphalt_d"]=texture_loader.load("./textures/asphalt_d.jpg");
+tex["asphalt_d"].colorSpace=THREE.SRGBColorSpace;
+tex["asphalt_d"].wrapS=tex["asphalt_d"].wrapT=THREE.RepeatWrapping;
+tex["asphalt_d"].repeat.set(60,60);
+
+
+tex["asphalt_n"]=texture_loader.load("./textures/asphalt_n.jpg");
+tex["asphalt_n"].wrapS=tex["asphalt_n"].wrapT=THREE.RepeatWrapping;
+
+
+tex["asphalt_r"]=texture_loader.load("./textures/asphalt_r.jpg");
+tex["asphalt_r"].wrapS=tex["asphalt_r"].wrapT=THREE.RepeatWrapping;
+tex["asphalt_r"].repeat.set(60,60);
+
+
+tex["asphalt_ao"]=texture_loader.load("./textures/asphalt_ao.jpg");
+tex["asphalt_ao"].wrapS=tex["asphalt_ao"].wrapT=THREE.RepeatWrapping;
+
+
+tex["asphalt_h"]=texture_loader.load("./textures/asphalt_h.jpg");
+tex["asphalt_h"].wrapS=tex["asphalt_h"].wrapT=THREE.RepeatWrapping;
+
+
+tex["indicator"]=texture_loader.load("./textures/atlas/indicator.png");
+
+
+tex["ammo_d"]=texture_loader.load("./models/ammo/ammo_d.png");
+tex["ammo_d"].colorSpace=THREE.SRGBColorSpace;
+tex["ammo_ao"]=texture_loader.load("./models/ammo/ammo_ao.png");
+tex["ammo_items"]=texture_loader.load("./models/ammo/ammo_items.png");
+tex["ammo_items"].colorSpace=THREE.SRGBColorSpace;
+tex["ammo_ms"]=texture_loader.load("./models/ammo/ammo_ms.jpg");
+tex["ammo_n"]=texture_loader.load("./models/ammo/ammo_n.png");
+
+
+tex["soldier_body_d"]=texture_loader.load("./models/soldier/soldier_body_d.png");
+tex["soldier_body_d"].colorSpace=THREE.SRGBColorSpace;
+tex["soldier_body_d"].wrapS=tex["soldier_body_d"].wrapT=THREE.RepeatWrapping;
+tex["soldier_body_n"]=texture_loader.load("./models/soldier/soldier_body_n.png");
+tex["soldier_body_s"]=texture_loader.load("./models/soldier/soldier_body_s.png");
+tex["soldier_head_d"]=texture_loader.load("./models/soldier/soldier_head_d.png");
+tex["soldier_head_d"].colorSpace=THREE.SRGBColorSpace;
+tex["soldier_head_n"]=texture_loader.load("./models/soldier/soldier_head_n.png");
+tex["soldier_head_s"]=texture_loader.load("./models/soldier/soldier_head_s.png");
+
+
+tex["gun_d"]=texture_loader.load("./models/gun/gun_d.png");
+tex["gun_d"].colorSpace=THREE.SRGBColorSpace;
+tex["gun_ao"]=texture_loader.load("./models/gun/gun_ao.png");
+tex["gun_m"]=texture_loader.load("./models/gun/gun_m.png");
+tex["gun_n"]=texture_loader.load("./models/gun/gun_n.png");
+tex["gun_r"]=texture_loader.load("./models/gun/gun_r.png");
+
+
+tex["uaz_d"]=texture_loader.load("./models/uaz/uaz_d.jpg");
+tex["uaz_d"].colorSpace=THREE.SRGBColorSpace;
+tex["uaz_n"]=texture_loader.load("./models/uaz/uaz_n.jpg");
+tex["uaz_s"]=texture_loader.load("./models/uaz/uaz_s.jpg");
+tex["uaz_m"]=texture_loader.load("./models/uaz/uaz_m.jpg");
+tex["uaz_ao"]=texture_loader.load("./models/uaz/uaz_ao.jpg");
+tex["uaz_o"]=texture_loader.load("./models/uaz/uaz_o.jpg");
+
+
+tex["uaz_glass_d"]=texture_loader.load("./models/uaz/uaz_glass_d.jpg");
+tex["uaz_glass_d"].colorSpace=THREE.SRGBColorSpace;
+tex["uaz_glass_n"]=texture_loader.load("./models/uaz/uaz_glass_n.jpg");
+tex["uaz_glass_s"]=texture_loader.load("./models/uaz/uaz_glass_s.jpg");
+tex["uaz_glass_m"]=texture_loader.load("./models/uaz/uaz_glass_m.jpg");
+tex["uaz_glass_ao"]=texture_loader.load("./models/uaz/uaz_glass_ao.jpg");
+tex["uaz_glass_o"]=texture_loader.load("./models/uaz/uaz_glass_o.jpg");
+function DataArrayTexture_set(items){
+	
+
+let width=0;
+let height=0;
+let depth=items.length;
+
+
+for(let n=0;n<depth;n++){
+if(width<items[n].image.width){ width=items[n].image.width; }
+if(height<items[n].image.height){ height=items[n].image.height; }
+}
+
+
+let size=width*height;
+let size_4=size*4;
+let data=new Uint8Array(4*size*depth);
+
+
+let canvas=document.createElement("canvas");
+let ctx=canvas.getContext("2d");
+canvas.width=width;
+canvas.height=height;
+
+
+for(let n=0;n<depth;n++){
+let texture_height=items[n].image.height;
+ctx.save();
+ctx.scale(1,-1);
+ctx.translate(0,-texture_height);
+ctx.drawImage(items[n].source.data,0,0);
+let image_data=ctx.getImageData(0,0,width,height).data;
+let offset=n*size_4;
+for(let i=0;i<size_4;i++){
+data[offset+i]=image_data[i];
+}
+ctx.restore();
+ctx.clearRect(0,0,width,height);
+}
+
+
+let texture=new THREE.DataArrayTexture(data,width,height,depth);
+texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
+texture.colorSpace=THREE.SRGBColorSpace;
+texture.generateMipmaps=true;
+texture.minFilter=THREE.LinearMipmapLinearFilter;
+texture.magFilter=THREE.LinearFilter;
+texture.needsUpdate=true;
+return texture; 
+
+
+}atlas["ammo"]=[[512/44,256/44,2/512,1-(134+44)/256],"indicator",512,256,44,44,134];
+atlas["area_a"]=[[512/44,256/44,2/512,1-(182+44)/256],"indicator",512,256,44,44,182];
+atlas["area_b"]=[[512/44,256/44,50/512,1-(134+44)/256],"indicator",512,256,44,44,134];
+atlas["area_c"]=[[512/44,256/44,50/512,1-(182+44)/256],"indicator",512,256,44,44,182];
+atlas["area_d"]=[[512/44,256/44,98/512,1-(134+44)/256],"indicator",512,256,44,44,134];
+atlas["arrow"]=[[512/16,256/16,230/512,1-(2+16)/256],"indicator",512,256,16,16,2];
+atlas["coin"]=[[512/128,256/128,2/512,1-(2+128)/256],"indicator",512,256,128,128,2];
+atlas["color"]=[[512/10,256/10,146/512,1-(2+10)/256],"indicator",512,256,10,10,2];
+atlas["damage"]=[[512/128,256/32,98/512,1-(182+32)/256],"indicator",512,256,128,32,182];
+atlas["digits_big"]=[[512/160,256/16,262/512,1-(2+16)/256],"indicator",512,256,160,16,2];
+atlas["digits_distance"]=[[512/256,256/16,2/512,1-(230+16)/256],"indicator",512,256,256,16,230];
+// УСТАНАВЛИВАЕМ НОМЕР ТЕКСТУРЫ
+
+
+function atlas_set(){
+
+
+for(let i in atlas){
+let number=0;
+let match=atlas[i][1].match(/^[^\-]*-(\d{1,2})/);
+if(match){ number=Number(match[1]); }
+atlas[i][1]=number;
+}
+
+	
+}let OBJLoader=new THREE_OBJLoader.OBJLoader(loadingManager);
+OBJLoader.mat=mat;
+let FBXLoader=new THREE_FBXLoader.FBXLoader(loadingManager);
+mat["ammo_crate"]=new THREE.MeshStandardMaterial({
+map:tex["ammo_d"],
+normalMap:tex["ammo_n"],
+normalScale:{x:2,y:2},
+aoMap:tex["ammo_ao"],
+metalnessMap:tex["ammo_ms"],
+metalness:0.4,
+roughnessMap:tex["ammo_ms"],
+roughness:1.2,
+side:THREE.DoubleSide,
+});
+
+
+mat["ammo_items"]=new THREE.MeshStandardMaterial({
+map:tex["ammo_items"],
+});
+
+
+OBJLoader.load("./models/ammo/ammo.obj",function(object){
+
+
+while(object.children.length){
+
+
+let name=object.children[0].name;
+
+
+mesh[name]=object.children[0];
+
+
+mesh[name].position.set(0,0,-8.25);
+mesh[name].castShadow=true;
+mesh[name].receiveShadow=true;
+
+
+scene.add(mesh[name]);
+
+
+}
+
+
+indicator["ammo_data"]["ammo_1"]={name:"ammo",object:mesh["ammo"],object_mw:mesh["ammo"].matrixWorld.elements,offset_x:0,offset_y:1,offset_z:0,radius:0.5};
+indicator["ammo_data"]["ammo_2"]={name:"ammo",object:mesh["ammo"],object_mw:mesh["ammo"].matrixWorld.elements,offset_x:2.1,offset_y:2.0,offset_z:0,radius:0.5};
+indicator["ammo_data"]["ammo_3"]={name:"ammo",object:mesh["ammo"],object_mw:mesh["ammo"].matrixWorld.elements,offset_x:-1.9,offset_y:2.0,offset_z:0,radius:0.5};
+
+
+});
+mat["gun"]=new THREE.MeshStandardMaterial({
+map:tex["gun_d"],
+normalMap:tex["gun_n"],
+normalScale:{x:2,y:2},
+aoMap:tex["gun_ao"],
+metalnessMap:tex["gun_m"],
+metalness:0.4,
+roughnessMap:tex["gun_r"],
+roughness:1.2,
+});
+
+
+// ____________________ GUN ____________________
+
+
+OBJLoader.load("./models/gun/gun.obj",function(object){
+
+
+while(object.children.length){
+
+
+let name=object.children[0].name;
+
+
+mesh[name]=object.children[0];
+
+
+mesh[name].position.set(0,0,0);
+mesh[name].scale.set(100,100,100);
+mesh[name].castShadow=true;
+mesh[name].receiveShadow=true;
+
+
+scene.add(mesh[name]);
+
+
+}
+
+
+});
+mat["uaz_body"]=new THREE.MeshStandardMaterial({
+map:tex["uaz_d"],
+envMap:environment_main,
+envMapIntensity:0.5,
+normalMap:tex["uaz_n"],
+aoMap:tex["uaz_ao"],
+aoMapIntensity:1.0,
+metalnessMap:tex["uaz_m"],
+metalness:1.0,
+roughnessMap:tex["uaz_s"],
+roughness:0.6,
+});
+
+
+mat["uaz_glass"]=new THREE.MeshStandardMaterial({
+map:tex["uaz_glass_d"],
+envMap:environment_main,
+normalMap:tex["uaz_glass_n"],
+aoMap:tex["uaz_glass_ao"],
+aoMapIntensity:0.8,
+metalnessMap:tex["uaz_glass_m"],
+metalness:1,
+roughnessMap:tex["uaz_glass_s"],
+roughness:1,
+transparent:true,
+opacity:0.2
+});
+
+
+OBJLoader.load("./models/uaz/uaz-452.obj",function(object){
+
+
+while(object.children.length){
+
+
+let name=object.children[0].name;
+
+
+mesh[name]=object.children[0];
+
+
+mesh[name].position.set(-5,0,0);
+mesh[name].castShadow=true;
+mesh[name].receiveShadow=true;
+
+
+mesh[name].frustumCulled=false;
+mesh[name].onAfterRender=function(){
+this.frustumCulled=true;
+this.onAfterRender=function(){};
+}
+
+
+scene.add(mesh[name]);
+
+
+}
+
+
+});
+mat["soldier_body"]=new THREE.MeshStandardMaterial({
+map:tex["soldier_body_d"],
+normalMap:tex["soldier_body_n"],
+normalScale:{x:1,y:1},
+//roughnessMap:tex["soldier_body_s"],
+//roughness:1,
+});
+
+
+mat["soldier_head"]=new THREE.MeshStandardMaterial({
+map:tex["soldier_head_d"],
+normalMap:tex["soldier_head_n"],
+normalScale:{x:1,y:1},
+//roughnessMap:tex["soldier_head_s"],
+//roughness:2.2,
+});
+
+
+FBXLoader.load('./models/soldier/soldier.fbx',function(object){
+
+
+mesh["soldier"]=object;
+// НАЗНАЧАЕМ МАТЕРИАЛ ОТДЕЛЬНО, ЧТОБЫ ПОТОМ МОЖНО БЫЛО ЕГО МЕНЯТЬ СРАЗУ НА ВСЕХ ОБЪЕКТАХ
+// КОЛИЧЕСТВО ТЕКСТУР УВЕЛИЧИВАЕТСЯ В СТАТИСТИКЕ РЕНДЕРИНГА, НО НА ПАМЯТИ ЭТО НИКАК НЕ ОТРАЖАЕТСЯ,
+// Т.К. В ПАМЯТИ ХРАНИТСЯ ВСЕГО ОДНА ТЕКСТУРА, А ОСТАЛЬНОЕ ЭТО ССЫЛКИ НА НЕЁ
+// ЕСЛИ НУЖЕН РАЗНЫЙ МАТЕРИАЛ, ТО ДЛЯ КАЖДОГО НАДО СОЗДАВАТЬ НОВЫЙ МАТЕРИАЛ С НУЖНЫМИ СВАОЙСТВАМИ
+// ЕСЛИ В НОВОМ МАТЕРИАЛЕ БУДЕТ ТАЖЕ ТЕКСТУРА, ТО ТОЖЕ НЕ ЗАЙМЁТ ПАМЯТЬ, А ТОЛЬКО УВЕЛИЧИТСЯ КОЛИЧЕСТВО ТЕКСТУР В СТАТИСТИКЕ РЕНДЕРИНГА
+mesh["soldier"].children[2].material=mat["soldier_body"];
+mesh["soldier"].children[3].material[0]=mat["soldier_body"];
+mesh["soldier"].children[3].material[1]=mat["soldier_head"];
+
+
+// СКРЫВАЕМ КОСТИ, СНИЖАЯ НАГРУЗКУ НА 10%. ПРИ ЭТОМ ДОСТАТОЧНО СКРЫТЬ ПЕРВУЮ ОСНОВНУЮ КОСТЬ, ОСТАЛЬНЫЕ НЕОБЯЗАТЕЛЬНО.
+mesh["soldier"].traverse(function(child){
+if(child.isBone){ child.visible=false; }
+});
+
+
+mesh["soldier"].traverse(function(child){
+if(child.isMesh){
+child.castShadow=true;
+child.receiveShadow=true;
+}
+});
+
+
+});
+"use strict"
+
+
+/*
+160721 СТАРТ РАЗРАБОТКИ
+160821 ПЕРВАЯ ВЕРСИЯ
+020424 ТЕПЕРЬ ПЕРЕДАЧА ВСЕХ ПАРАМЕТРОВ ОБЯЗАТЕЛЬНА, ЧТОБЫ НЕ ПУТАТЬСЯ
+210424 ДОБАВЛЕН DynamicsCompressor. ПОМОГАЕТ УБРАТЬ ГРОМКИЙ ЗВУК, КОГДА ИГРАЮТ НЕСКОЛЬКО ЗВУКОВ ОДНОВРЕМЕННО
+220424 УДАЛОСЬ УМЕНЬШИТЬ ЗАНИМАЕМУЮ ОПЕРАТИВНУЮ ПАМЯТЬ ПРИ ИСПОЛЬЗОВАНИИ ЭФФЕКТОВ CONVOLVER С СИЛОЙ СМЕШИВАНИЯ С ОБЫЧНЫМ ЗВУКОМ.
+НАПРИМЕР, НАДО БЫЛО 100 ЗВУКОВ ВЫСТРЕЛОВ С ЭФФЕКТОМ ЭХА. ЕСЛИ СОЗДАВАТЬ 100 ОТДЕЛЬНЫХ ЭФФЕКТОВ CONVOLVER ЭХО, ТО ЭТО ОКОЛО 1ГБ ПАМЯТИ.
+А ЕСЛИ СОЗДАТЬ ОДИН ЭФФЕКТ ЭХО И ПРОСТО К НЕМУ ПРИСОЕДИНЯТЬ 100 РЕГУЛЯТОРОВ ГРОМКОСТИ, ТО 10МБ.
+
+
+ЗАПУСК ОДНОГО ЗВУКА С ЭФФЕКТОМ И БЕЗ ЗАНИМАЕТ 0.10 МС, 10 ЗВУКОВ 0.50 МС, 20 ЗВУКОВ 0.90 МС
+НО ЭТО ЕСЛИ ОДНОВРЕМЕННО ЗАПУСТИТЬ ВСЕ 20 ЗВУКОВ, А Т.К. ЭТО МАЛОВЕРОЯТНО, ТО НОРМАЛЬНО.
+disconnect ЗАНИМАЕТ 0 МС
+ПРИ СОЗДАНИИ НОВОЙ ФУНКЦИИ НЕ ЗАБЫВАТЬ ОЧИЩАТЬ delete music_fade_in[name]; delete music_fade_out[name]; delete sounds_fade_in[name]; delete sounds_fade_out[name];
+*/
+
+
+let music_speed=1; // ОБЩАЯ СКОРОСТЬ МУЗЫКИ
+let sounds_speed=1; // ОБЩАЯ СКОРОСТЬ ЗВУКОВ
+let music_status=1; // 0 - НА ПАУЗЕ, 1 - РАБОТАЕТ
+let sounds_status=1; // 0 - НА ПАУЗЕ, 1 - РАБОТАЕТ
+
+
+// ДАННЫЕ
+
+
+let sound=[]; // ЗВУКИ В БУФЕРЕ
+let music=[]; // МУЗЫКА ВОСПРОИЗВОДИМАЯ СЕЙЧАС
+let music_fade_in=[]; // МУЗЫКА С ПЛАВНЫМ ВХОДОМ
+let music_fade_out=[]; // МУЗЫКА С ПЛАВНЫМ ВЫХОДОМ
+let sounds_fade_in=[]; // ЗВУК С ПЛАВНЫМ ВХОДОМ
+let sounds_fade_out=[]; // ЗВУК С ПЛАВНЫМ ВЫХОДОМ
+let sounds=[]; // ЗВУКИ ВОСПРОИЗВОДИМЫЕ СЕЙЧАС
+let sound_n=0; // СЧЁТЧИК ЗВУКОВ ДЛЯ СОЗДАНИЯ РАЗНЫХ ИМЁН ЗВУКОВ
+let music_effect=[]; // ЭФФЕКТЫ ДЛЯ МУЗЫКИ
+let sound_effect=[]; // ЭФФЕКТЫ ДЛЯ ЗВУКОВ
+
+
+// КОНТЕКСТ
+
+
+window.AudioContext=window.AudioContext || window.webkitAudioContext;
+let sounds_context=new AudioContext();
+let sounds_destination=sounds_context.destination;
+let sounds_listener=sounds_context.listener;
+
+
+// ОБЩИЕ ГРОМКОСТИ
+
+
+let menu_volume=sounds_context.createGain();
+menu_volume.gain.value=1; // ОБЩАЯ ГРОМКОСТЬ МЕНЮ
+menu_volume.connect(sounds_destination);
+let music_volume=sounds_context.createGain();
+music_volume.gain.value=1; // ОБЩАЯ ГРОМКОСТЬ МУЗЫКИ
+music_volume.connect(sounds_destination);
+let sounds_volume=sounds_context.createGain();
+sounds_volume.gain.value=1; // ОБЩАЯ СКОРОСТЬ ЗВУКОВ
+const compressor = sounds_context.createDynamicsCompressor();
+/*
+compressor.threshold.setValueAtTime(-50, sounds_context.currentTime);
+compressor.knee.setValueAtTime(40, sounds_context.currentTime);
+compressor.ratio.setValueAtTime(12, sounds_context.currentTime);
+compressor.attack.setValueAtTime(0, sounds_context.currentTime);
+compressor.release.setValueAtTime(0.25, sounds_context.currentTime);
+*/
+/*
+compressor.threshold.setValueAtTime(-5.0,sounds_context.currentTime); // In Decibels
+compressor.knee.setValueAtTime(0,sounds_context.currentTime); // In Decibels
+compressor.ratio.setValueAtTime(40.0, sounds_context.currentTime);  // In Decibels
+compressor.attack.setValueAtTime(0.001, sounds_context.currentTime); // Time is seconds
+compressor.release.setValueAtTime(0.1, sounds_context.currentTime); // Time is seconds
+*/
+/*
+compressor.threshold.value = -50; // Порог срабатывания
+compressor.knee.value = 40; // Мягкий/жесткий режим компрессии
+compressor.ratio.value = 12; // Отношение компрессии
+compressor.attack.value = 0.003; // Время нарастания
+compressor.release.value = 0.25; // Время спада
+*/
+compressor.connect(sounds_destination);
+//sounds_volume.connect(sounds_destination);
+sounds_volume.connect(compressor);
+
+
+// СОЗДАЁМ ЗАРАНЕЕ ФИЛЬТР И ГРОМКОСТИ, ЧТОБЫ КАЖДЫЙ РАЗ НЕ СОЗДАВАТЬ И БЫЛО МЕНЬШЕ СКАЧКОВ FPS
+
+
+let sounds_biquad_i=[];
+let sounds_panner_i=[];
+let sounds_volume_f=[];
+let sounds_volume_i=[];
+let sounds_volume_n=0;
+
+
+function sounds_volume_gen(amount){
+
+
+let max=sounds_volume_n+amount;
+for(let n=sounds_volume_n;n<max;n++){
+sounds_biquad_i[n]=sounds_context.createBiquadFilter();
+sounds_biquad_i[n].type="lowpass";
+sounds_volume_i[n]=sounds_context.createGain();
+sounds_volume_i[n].volume=1;
+sounds_volume_i[n].gain.value=1;
+sounds_panner_i[n]=sounds_context.createPanner();
+sounds_panner_i[n].panningModel="HRTF";
+sounds_panner_i[n].connect(sounds_volume_i[n]);
+sounds_volume_f.push(n);
+sounds_volume_n++;
+}
+
+
+}
+
+
+// СОЗДАЁМ ЭФФЕКТЫ ЗАРАНЕЕ, Т.К. СОЗДАНИЕ ОДНОГО ЭФФЕКТА ЗАНИМАЕТ 1-30 МС
+
+
+function music_effects_gen(){
+
+
+for(let n=0;n<sounds_total;n++){
+let item=sounds_list[n];
+if(item[1].match(/sounds\/effects/)){
+music_effect[item[0]]=sounds_context.createConvolver();
+music_effect[item[0]].buffer=sound[item[0]];
+music_effect[item[0]].connect(music_volume);
+}
+}
+
+
+}
+
+
+function sounds_effects_gen(){
+
+
+for(let n=0;n<sounds_total;n++){
+let item=sounds_list[n];
+if(item[1].match(/sounds\/effects/)){
+sound_effect[item[0]]=sounds_context.createConvolver();
+sound_effect[item[0]].buffer=sound[item[0]];
+sound_effect[item[0]].connect(sounds_volume);
+}
+}
+
+
+}
+
+
+// ____________________ ОБНОВЛЕНИЕ СЛУШАТЕЛЯ 3D ____________________
+
+
+function sounds_listener_update(){
+
+
+let p=camera.matrixWorld.elements,q=camera.quaternion,qx=q.x,qy=q.y,qz=q.z,qw=q.w; 
+sounds_listener.positionX.value=p[12];
+sounds_listener.positionY.value=p[13];
+sounds_listener.positionZ.value=p[14];
+sounds_listener.forwardX.value=-qy*qw+qz*-qx+qx*-qz+qw*-qy;
+sounds_listener.forwardY.value=qx*qw+qz*-qy-qw*-qx+qy*-qz;
+sounds_listener.forwardZ.value=-qw*qw+qz*-qz-qy*-qy-qx*-qx;
+
+
+}
+
+
+// ____________________ ОБНОВЛЕНИЕ ОРИЕНТАЦИИ ЗВУКА 3D ____________________
+
+
+// 100 ОБНОВЛЕНИЙ ЗА 0.8МС, 50 ЗА 0.4МС, 20 ЗА 0.2МС, 10 ЗА 0.1МС
+
+
+function sounds_panner_update(item,sound_panner){
+
+
+let p=item.matrixWorld.elements,q=item.quaternion,qx=q.x,qy=q.y,qz=q.z,qw=q.w;  
+sound_panner.positionX.value=p[12];
+sound_panner.positionY.value=p[13];
+sound_panner.positionZ.value=p[14];  
+sound_panner.orientationX.value=qy*qw-qz*-qx-qx*-qz-qw*-qy;
+sound_panner.orientationY.value=-qx*qw-qz*-qy+qw*-qx-qy*-qz;
+sound_panner.orientationZ.value=qw*qw-qz*-qz+qy*-qy+qx*-qx;
+
+
+}
+
+
+// ____________________ ИЗМЕНЕНИЕ ОБЩЕГО УРОВНЯ ГРОМКОСТИ МЕНЮ ____________________
+
+
+function menu_volume_set(v){
+
+
+menu_volume.gain.setTargetAtTime(Number(v),sounds_context.currentTime,0.01);
+
+
+}
+
+
+// ____________________ ВОСПРОИЗВЕСТИ ЗВУК В МЕНЮ ____________________
+
+
+function menu_play(track,volume,speed){
+
+
+// track - КАКОЙ ЗВУК ВОСПРОИЗВЕСТИ
+// volume - ГРОМКОСТЬ // speed - СКОРОСТЬ ВОСПРОИЗВЕДЕНИЯ
+
+
+let menu_sound=sounds_context.createBufferSource();
+menu_sound.buffer=sound[track];
+menu_sound.playbackRate.value=speed;
+menu_sound.gain_i=sounds_context.createGain();
+menu_sound.gain_i.gain.value=volume;
+menu_sound.gain_i.connect(menu_volume);
+menu_sound.connect(menu_sound.gain_i);
+menu_sound.onended=function(){ this.disconnect(); this.gain_i.disconnect(); this.gain_i=null; }
+menu_sound.start();
+
+
+}
+
+
+// ____________________ ИЗМЕНЕНИЕ ОБЩЕЙ ГРОМКОСТИ МУЗЫКИ ____________________
+
+
+function music_volume_set(v){
+
+
+music_volume.gain.setTargetAtTime(Number(v),sounds_context.currentTime,0.01);
+
+
+}
+
+
+// ____________________ ИЗМЕНЕНИЕ ОБЩЕЙ СКОРОСТИ МУЗЫКИ ____________________
+
+
+function music_speed_set(v){
+
+
+music_speed=Number(v);
+
+
+for(let name in music){
+try{ music[name].playbackRate.value=music[name].speed*music_speed; }
+catch(e){}
+}
+
+
+}
+
+
+// ____________________ ВОСПРОИЗВЕСТИ МУЗЫКУ ____________________
+
+
+function music_play(name,track,loop,effect,speed,detune,volume){
+
+
+// name - ИМЯ МУЗЫКИ МОЖНО УКАЗАТЬ СВОЁ, ЛИБО null
+// track - КАКУЮ МУЗЫКУ ВОСПРОИЗВЕСТИ
+// loop - БЕСКОНЕЧНЫЙ ЗВУК true ИЛИ ОДНОРАЗОВЫЙ false
+// effect - НАЗВАНИЕ ЭФФЕКТА, ЛИБО false
+// speed - СКОРОСТЬ // detune - ТОНАЛЬНОСТЬ // volume - ГРОМКОСТЬ 
+
+sound_n++;
+let name_c;
+if(name==null){ name_c=track+"_"+sound_n; }
+else{ name_c=name; music_delete_fast(name); }
+music[name_c]=sounds_context.createBufferSource();
+let item=music[name_c];
+item.buffer=sound[track];
+item.loop=loop;
+item.speed=speed;
+item.detune.value=detune;
+item.playbackRate.value=speed*music_speed*music_status;
+item.gain_i=sounds_context.createGain();
+item.gain_i.gain.value=volume;
+item.volume=volume;
+if(effect){
+item.gain_i.connect(music_effect[effect]);
+}
+else{
+item.gain_i.connect(music_volume);
+}
+item.connect(item.gain_i);
+// onended СРАБАТЫВАЕТ ПРИ stop() И ПРИ ОКОНЧАНИИ ЗВУКА И ПРИ ЗНАЧЕНИИ start(999) БОЛЬШЕ ДЛИТЕЛЬНОСТИ ЗВУКА
+item.onended=function(){
+try{
+delete music_fade_in[name_c];
+delete music_fade_out[name_c];
+music[name_c].disconnect();
+music[name_c].gain_i.disconnect();
+music[name_c].gain_i=null;
+delete music[name_c];
+}
+catch(e){}
+}
+item.start();
+return name_c;
+
+
+}
+
+
+// ____________________ ПОСТАВИТЬ НА ПАУЗУ ОДНУ МУЗЫКУ ИЛИ ВСЮ ____________________
+
+
+function music_pause(name){
+
+
+if(name){
+try{ music[name].playbackRate.value=0; return true; }
+catch(e){ return false; }
+}
+else{
+music_status=0;
+for(let name in music){
+try{ music[name].playbackRate.value=0; }
+catch(e){}
+}
+}
+
+
+}
+
+
+// ____________________ ВОЗОБНОВИТЬ ОДНУ МУЗЫКУ ИЛИ ВСЮ ____________________
+
+
+function music_resume(name){
+
+
+if(name){
+try{ music[name].playbackRate.value=music[name].speed*music_speed; return true; }
+catch(e){ return false; }
+}
+else{
+music_status=1;
+for(let name in music){
+try{ music[name].playbackRate.value=music[name].speed*music_speed; }
+catch(e){}
+}
+}
+
+
+}
+
+
+// ____________________ УДАЛИТЬ ОДНУ МУЗЫКУ ИЛИ ВСЮ - СРАЗУ И, ВОЗМОЖНО, С ХРИПОМ ____________________
+
+
+function music_delete_fast(name){
+
+
+if(name){
+try{ delete music_fade_in[name]; delete music_fade_out[name]; music[name].onended=null; music[name].stop(); music[name].disconnect(); music[name].gain_i.disconnect(); music[name].gain_i=null; delete music[name]; return true; }
+catch(e){ return false; }
+}
+else{
+music_fade_in=[];
+music_fade_out=[];
+for(let name in music){
+try{ music[name].onended=null; music[name].stop(); music[name].disconnect(); music[name].gain_i.disconnect(); music[name].gain_i=null; delete music[name]; }
+catch(e){}
+}
+}
+
+
+}
+
+
+// ____________________ УДАЛИТЬ ОДНУ МУЗЫКУ ИЛИ ВСЮ - МЕДЛЕННО И БЕЗ ХРИПА ____________________
+
+
+function music_delete_slow(name,time){
+
+
+// name - ИМЯ МУЗЫКИ ИЗ МАССИВА music. ЛИБО "all" - ВСЕ
+// time - ЗА КАКОЕ ВРЕМЯ ВЫПОЛНИТЬ В СЕКУНДАХ. ЛИБО ОСТАВИТЬ ПУСТЫМ, ТОГДА ПО УМОЛЧАНИЮ ВРЕМЯ 0.01 СЕКУНДЫ
+
+
+if(time<0.01){ time=0.01; }
+if(name!="all"){
+try{
+delete music_fade_in[name];
+delete music_fade_out[name];
+music[name].gain_i.gain.setTargetAtTime(0,sounds_context.currentTime,time);
+music[name].stop(sounds_context.currentTime+time);
+return true;
+}
+catch(e){ return false; }
+}
+else{
+music_fade_in=[];
+music_fade_out=[];
+for(let name in music){
+try{
+music[name].gain_i.gain.setTargetAtTime(0,sounds_context.currentTime,time);
+music[name].stop(sounds_context.currentTime+time);
+}
+catch(e){}
+}
+}
+
+
+}
+
+
+// ____________________ ПЛАВНЫЙ ВХОД МУЗЫКИ ____________________
+
+
+function music_fade_in_set(name,time,volume,speed){
+
+
+// name - НАЗВАНИЕ МУЗЫКИ ИЗ МАССИВА music, ЛИБО "all" - ВСЕ
+// time - ЗА КАКОЕ ВРЕМЯ ВЫПОЛНИТЬ В МИЛЛИСЕКУНДАХ. ЕСЛИ ПОЯВИЛСЯ ХРИП, ТО СТАВИТЬ БОЛЬШЕ
+// volume - ПЛАВНЫЙ ВХОД ДО УКАЗАННОЙ ГРОМКОСТИ, ЛИБО -1, Т.Е. МУЗЫКА БЫЛА ПРИОСТАНОВЛЕНА И ТЕПЕРЬ НАДО ВЕРНУТЬ ГРОМКОСТЬ ТУ ЖЕ, ЧТО И БЫЛА
+// speed - СКОРОСТЬ
+
+if(name!="all"){
+if(!music[name]){ return false; }
+try{
+music[name].speed=speed;
+music[name].playbackRate.value=speed*music_speed*music_status;
+}
+catch(e){}
+delete music_fade_in[name];
+delete music_fade_out[name];
+music_fade_in[name]={};
+let item=music_fade_in[name];
+item.time_total=time;
+item.time_elapsed=0;
+try{
+item.volume_first=music[name].volume;
+item.volume_in=volume-item.volume_first;
+item.volume_to=volume;
+if(volume<item.volume_first){ item.volume_in=0; }
+if(volume==-1){ item.volume_in=item.volume_first; item.volume_first=0; item.volume_to=item.volume_in; }
+return true;
+}
+catch(e){ delete music_fade_in[name]; return false; }
+}
+else{
+music_fade_in=[];
+music_fade_out=[];
+for(let name in music){
+try{
+music[name].speed=speed;
+music[name].playbackRate.value=speed*music_speed*music_status;
+}
+catch(e){}
+music_fade_in[name]={};
+let item=music_fade_in[name];
+item.time_total=time;
+item.time_elapsed=0;
+try{
+item.volume_first=music[name].volume;
+item.volume_in=volume-item.volume_first;
+item.volume_to=volume;
+if(volume<item.volume_first){ item.volume_in=0; }
+if(volume==-1){ item.volume_in=item.volume_first; item.volume_first=0; item.volume_to=item.volume_in; }
+}
+catch(e){ delete music_fade_in[name]; }
+}
+}
+
+
+}
+
+
+function music_fade_in_update(){
+
+
+for(let name in music_fade_in){
+
+
+let item=music_fade_in[name];
+item.time_elapsed+=delta;
+let volume=item.volume_first+item.volume_in*(item.time_elapsed/item.time_total);
+if(volume>item.volume_to){ volume=item.volume_to; }
+if(item.time_elapsed>=item.time_total){ volume=item.volume_to; delete music_fade_in[name]; }
+try{
+music[name].volume=volume;
+music[name].gain_i.gain.value=volume;
+}
+catch(e){}
+
+
+}
+
+
+}
+
+
+// ____________________ ПЛАВНЫЙ ВЫХОД МУЗЫКИ ____________________
+
+
+function music_fade_out_set(name,time,action){
+
+
+// name - НАЗВАНИЕ МУЗЫКИ ИЗ МАССИВА music, ЛИБО "all" - ВСЕ
+// time - ЗА КАКОЕ ВРЕМЯ ВЫПОЛНИТЬ В МИЛЛИСЕКУНДАХ. ЕСЛИ ПОЯВИЛСЯ ХРИП, ТО СТАВИТЬ БОЛЬШЕ
+// action - ДЕЙСТВИЕ В КОНЦЕ: 0 - НИЧЕГО, 1 - ПОСТАВИТЬ НА ПАУЗУ, 2 - УДАЛИТЬ 
+
+if(name!="all"){
+if(!music[name]){ return false; }
+delete music_fade_in[name];
+delete music_fade_out[name];
+music_fade_out[name]={};
+let item=music_fade_out[name];
+item.time_total=time;
+item.time_elapsed=0;
+item.action=action;
+try{ item.volume=music[name].volume; return true; }
+catch(e){ delete music_fade_out[name]; return false; }
+}
+else{
+music_fade_in=[];
+music_fade_out=[];
+for(let name in music){
+music_fade_out[name]={};
+let item=music_fade_out[name];
+item.time_total=time;
+item.time_elapsed=0;
+item.action=action;
+try{ item.volume=music[name].volume; }
+catch(e){ delete music_fade_out[name]; }
+}
+}
+
+}
+
+
+function music_fade_out_update(){
+
+
+for(let name in music_fade_out){
+
+
+let item=music_fade_out[name];
+item.time_elapsed+=delta;
+let volume=item.volume*(1-item.time_elapsed/item.time_total);
+if(0>volume){ volume=0; }
+try{
+music[name].volume=volume;
+music[name].gain_i.gain.value=volume;
+}
+catch(e){}
+if(item.time_elapsed>=item.time_total){
+delete music_fade_out[name];
+if(item.action==1){ music[name].playbackRate.value=0; }
+if(item.action==2){ music_delete_fast(name); }
+}
+
+
+}
+
+
+}
+
+
+// ____________________ ИЗМЕНЕНИЕ ОБЩЕЙ ГРОМКОСТИ ЗВУКОВ ____________________
+
+
+function sounds_volume_set(v){
+
+
+sounds_volume.gain.setTargetAtTime(Number(v),sounds_context.currentTime,0.01);
+
+
+}
+
+
+// ____________________ ИЗМЕНЕНИЕ ОБЩЕЙ СКОРОСТИ ЗВУКОВ ____________________
+
+
+function sounds_speed_set(v){
+
+
+sounds_speed=Number(v);
+
+
+for(let name in sounds){
+try{ sounds[name].playbackRate.value=sounds[name].speed*sounds_speed; }
+catch(e){}
+}
+
+
+}
+
+
+// ____________________ ВОСПРОИЗВЕСТИ 2D ИЛИ 3D ЗВУК ____________________
+
+
+function sounds_play(name,track,loop,effect,speed,detune,volume,frequency,type,distance,object,coneInnerAngle,coneOuterAngle,coneOuterGain,refDistance,rolloffFactor){
+
+
+// name - ИМЯ ЗВУКА МОЖНО УКАЗАТЬ СВОЁ, ЛИБО null
+// track - КАКОЙ ЗВУК ВОСПРОИЗВЕСТИ
+// loop - БЕСКОНЕЧНЫЙ ЗВУК true ИЛИ ОДНОРАЗОВЫЙ false
+// effect - НАЗВАНИЕ ЭФФЕКТА, ЛИБО false
+// speed - СКОРОСТЬ // detune - ТОНАЛЬНОСТЬ, НАПРИМЕР, ДЛЯ ЗВУКА ЗА СТЕНОЙ ИЛИ ВДАЛИ
+// volume - ГРОМКОСТЬ // frequency - ЧАСТОТА, НАПРИМЕР, ДЛЯ ЗВУКА ЗА СТЕНОЙ ИЛИ ВДАЛИ. ЕСЛИ НЕ ПЛАНИРУЕТСЯ ИЗМЕНЯТЬ, ТО false
+// object - ДЛЯ 3D ЗВУКА ПЕРЕДАЁМ MESH ИЛИ ЕГО ПОДОБИЕ. ЕСЛИ 2D, ТО false
+// coneInnerAngle - ВНУТРЕННИЙ УГОЛ. ПО УМОЛЧАНИЮ 360
+// coneOuterAngle - ВНЕШНИЙ УГОЛ, КОГДА НАХОДИШЬСЯ ПОЗАДИ ЗВУЧАЩЕГО ОБЪЕКТА. ПО УМОЛЧАНИЮ 360
+// coneOuterGain - УРОВЕНЬ ГРОМКОСТИ ВНЕШНЕГО УГЛА, КОГДА НАХОДИШЬСЯ ПОЗАДИ ЗВУЧАЩЕГО ОБЪЕКТА - У ВНЕШНЕГО УГЛА. 0-1. ПО УМОЛЧАНИЮ 0
+// refDistance - ДИСТАНЦИЯ, НАЧИНАЯ С КОТОРОЙ, ЗВУК БУДЕТ УМЕНЬШАТЬСЯ. ПО УМОЛЧАНИЮ 1
+// rolloffFactor - НА СКОЛЬКО БЫСТРО ДОЛЖНА УМЕНЬШАТЬСЯ ГРОМКОСТЬ ЗВУКА, НАЧИНАЯ С ДИСТАНЦИИ refDistance. ПО УМОЛЧАНИЮ 1
+
+
+sound_n++;
+let name_c;
+if(name==null){ name_c=track+"_"+sound_n; }
+else{ name_c=name; sounds_delete_fast(name); }
+sounds[name_c]=sounds_context.createBufferSource();
+let item=sounds[name_c];
+item.buffer=sound[track];
+item.loop=loop;
+item.speed=speed;
+item.detune.value=detune;
+item.playbackRate.value=speed*sounds_speed*sounds_status;
+let volume_n=sounds_volume_f.pop();
+if(volume_n==undefined){ sounds_volume_gen(10); volume_n=sounds_volume_f.pop(); console.log("Few sounds_volume_f. Changed to: "+sounds_volume_n); }
+let volume_g=sounds_volume_i[volume_n];
+volume_g.volume=volume;
+volume_g.gain.value=volume;
+
+
+if(effect){
+
+
+if(frequency===false){
+volume_g.connect(sound_effect[effect]);
+}
+else{ 
+sounds_biquad_i[volume_n].connect(sound_effect[effect]);
+volume_g.connect(sounds_biquad_i[volume_n]);
+}
+
+
+}
+else{
+
+
+if(frequency===false){
+volume_g.connect(sounds_volume);
+}
+else{ 
+sounds_biquad_i[volume_n].connect(sounds_volume);
+volume_g.connect(sounds_biquad_i[volume_n]);
+}
+
+
+}
+
+
+if(frequency!==false){ sounds_biquad_i[volume_n].frequency.value=frequency; }
+
+
+if(object){
+let panner=sounds_panner_i[volume_n];
+panner.coneInnerAngle=coneInnerAngle;
+panner.coneOuterAngle=coneOuterAngle;
+panner.coneOuterGain=coneOuterGain;
+panner.refDistance=refDistance;
+panner.rolloffFactor=rolloffFactor;
+// СРАЗУ ОБНОВЛЯЕМ ПОЗИЦИЮ ЗВУКА
+sounds_panner_update(object,panner);
+item.connect(panner);
+}
+else{
+item.connect(volume_g);
+}
+
+
+item.n=volume_n;
+// onended СРАБАТЫВАЕТ ПРИ stop() И ПРИ ОКОНЧАНИИ ЗВУКА И ПРИ ЗНАЧЕНИИ start(999) БОЛЬШЕ ДЛИТЕЛЬНОСТИ ЗВУКА
+item.onended=function(){
+try{
+delete sounds_fade_in[name_c];
+delete sounds_fade_out[name_c];
+sounds[name_c].disconnect();
+sounds_volume_i[sounds[name_c].n].disconnect();
+sounds_biquad_i[sounds[name_c].n].disconnect();
+sounds_volume_f.push(sounds[name_c].n);
+delete sounds[name_c];
+}
+catch(e){}
+}
+item.start();
+return name_c;
+
+
+}
+
+
+// ____________________ ПОСТАВИТЬ НА ПАУЗУ ОДИН ЗВУК ИЛИ ВСЕ ____________________
+
+
+function sounds_pause(name){
+
+
+if(name){
+try{ sounds[name].playbackRate.value=0; return true; }
+catch(e){ return false; }
+}
+else{
+sounds_status=0;
+for(let name in sounds){
+try{ sounds[name].playbackRate.value=0; }
+catch(e){}
+}
+}
+
+
+}
+
+
+// ____________________ ВОЗОБНОВИТЬ ОДИН ЗВУК ИЛИ ВСЕ ____________________
+
+
+function sounds_resume(name){
+
+
+if(name){
+try{ sounds[name].playbackRate.value=sounds[name].speed*sounds_speed; return true; }
+catch(e){ return false; }
+}
+else{
+sounds_status=1;
+for(let name in sounds){
+try{ sounds[name].playbackRate.value=sounds[name].speed*sounds_speed;}
+catch(e){}
+}
+}
+
+
+}
+
+
+// ____________________ УДАЛИТЬ ОДИН ЗВУК ИЛИ ВСЕ - СРАЗУ И, ВОЗМОЖНО, С ХРИПОМ ____________________
+
+
+function sounds_delete_fast(name){
+
+
+if(name){
+try{ delete sounds_fade_in[name]; delete sounds_fade_out[name]; sounds[name].onended=null; sounds[name].stop(); sounds[name].disconnect(); sounds_volume_i[sounds[name].n].disconnect(); sounds_volume_f.push(sounds[name].n); delete sounds[name]; return true; }
+catch(e){ return false; }
+}
+else{
+sounds_fade_in=[];
+sounds_fade_out=[];
+for(let name in sounds){
+try{ sounds[name].onended=null; sounds[name].stop(); sounds[name].disconnect(); sounds_volume_i[sounds[name].n].disconnect(); sounds_volume_f.push(sounds[name].n); delete sounds[name]; }
+catch(e){}
+}
+}
+
+
+}
+
+
+// ____________________ УДАЛИТЬ ОДИН ЗВУК ИЛИ ВСЕ - МЕДЛЕННО И БЕЗ ХРИПА ____________________
+
+
+function sounds_delete_slow(name,time){
+
+
+// name - ИМЯ ЗВУКА ИЗ МАССИВА sounds. ЛИБО "all" - ВСЕ
+// time - ЗА КАКОЕ ВРЕМЯ ВЫПОЛНИТЬ В СЕКУНДАХ. ЛИБО ОСТАВИТЬ ПУСТЫМ, ТОГДА ПО УМОЛЧАНИЮ ВРЕМЯ 0.01 СЕКУНДЫ
+
+
+if(time<0.01){ time=0.01; }
+if(name!="all"){
+try{
+delete sounds_fade_in[name];
+delete sounds_fade_out[name];
+sounds_volume_i[sounds[name].n].gain.setTargetAtTime(0,sounds_context.currentTime,time);
+sounds[name].stop(sounds_context.currentTime+time);
+return true;
+}
+catch(e){ return false; }
+}
+else{
+sounds_fade_in=[];
+sounds_fade_out=[];
+for(let name in sounds){
+try{
+sounds_volume_i[sounds[name].n].gain.setTargetAtTime(0,sounds_context.currentTime,time);
+sounds[name].stop(sounds_context.currentTime+time);
+}
+catch(e){}
+}
+}
+
+
+}
+
+
+// ____________________ ПЛАВНЫЙ ВХОД ЗВУКА ____________________
+
+
+function sounds_fade_in_set(name,time,volume,speed){
+
+
+// name - НАЗВАНИЕ ЗВУКА ИЗ МАССИВА sounds, ЛИБО "all" - ВСЕ
+// time - ЗА КАКОЕ ВРЕМЯ ВЫПОЛНИТЬ В МИЛЛИСЕКУНДАХ. ЕСЛИ ПОЯВИЛСЯ ХРИП, ТО СТАВИТЬ БОЛЬШЕ
+// volume - ПЛАВНЫЙ ВХОД ДО УКАЗАННОЙ ГРОМКОСТИ, ЛИБО -1, Т.Е. ЗВУК БЫЛ ПРИОСТАНОВЛЕН И ТЕПЕРЬ НАДО ВЕРНУТЬ ГРОМКОСТЬ ТУ ЖЕ, ЧТО И БЫЛА
+// speed - СКОРОСТЬ 
+
+if(name!="all"){
+if(!sounds[name]){ return false; }
+try{
+sounds[name].speed=speed;
+sounds[name].playbackRate.value=speed*sounds_speed*sounds_status;
+}
+catch(e){}
+delete sounds_fade_in[name];
+delete sounds_fade_out[name];
+sounds_fade_in[name]={};
+let item=sounds_fade_in[name];
+item.time_total=time;
+item.time_elapsed=0;
+try{
+item.volume_first=sounds_volume_i[sounds[name].n].volume;
+item.volume_in=volume-item.volume_first;
+item.volume_to=volume;
+if(volume<item.volume_first){ item.volume_in=0; }
+if(volume==-1){ item.volume_in=item.volume_first; item.volume_first=0; item.volume_to=item.volume_in; }
+return true;
+}
+catch(e){ delete sounds_fade_in[name]; return false; }
+}
+else{
+sounds_fade_in=[];
+sounds_fade_out=[];
+for(let name in sounds){
+try{
+sounds[name].speed=speed;
+sounds[name].playbackRate.value=speed*sounds_speed*sounds_status;
+}
+catch(e){}
+sounds_fade_in[name]={};
+let item=sounds_fade_in[name];
+item.time_total=time;
+item.time_elapsed=0;
+try{
+item.volume_first=sounds_volume_i[sounds[name].n].volume;
+item.volume_in=volume-item.volume_first;
+item.volume_to=volume;
+if(volume<item.volume_first){ item.volume_in=0; }
+if(volume==-1){ item.volume_in=item.volume_first; item.volume_first=0; item.volume_to=item.volume_in; }
+}
+catch(e){ delete sounds_fade_in[name]; }
+}
+}
+
+
+}
+
+
+function sounds_fade_in_update(){
+
+
+for(let name in sounds_fade_in){
+
+
+let item=sounds_fade_in[name];
+item.time_elapsed+=delta;
+let volume=item.volume_first+item.volume_in*(item.time_elapsed/item.time_total);
+if(volume>item.volume_to){ volume=item.volume_to; }
+if(item.time_elapsed>=item.time_total){ volume=item.volume_to; delete sounds_fade_in[name]; }
+try{
+sounds_volume_i[sounds[name].n].volume=volume;
+sounds_volume_i[sounds[name].n].gain.value=volume;
+}
+catch(e){}
+
+
+}
+
+
+}
+
+
+// ____________________ ПЛАВНЫЙ ВЫХОД ЗВУКА ОДНОГО ИЛИ ВСЕХ ____________________
+
+
+function sounds_fade_out_set(name,time,action){
+
+
+// name - НАЗВАНИЕ ЗВУКА ИЗ МАССИВА sounds, ЛИБО "all" - ВСЕ
+// time - ЗА КАКОЕ ВРЕМЯ ВЫПОЛНИТЬ В МИЛЛИСЕКУНДАХ. ЕСЛИ ПОЯВИЛСЯ ХРИП, ТО СТАВИТЬ БОЛЬШЕ
+// action - ДЕЙСТВИЕ В КОНЦЕ: 0 - НИЧЕГО, 1 - ПОСТАВИТЬ НА ПАУЗУ, 2 - УДАЛИТЬ 
+
+if(name!="all"){
+if(!sounds[name]){ return false; }
+delete sounds_fade_in[name];
+delete sounds_fade_out[name];
+sounds_fade_out[name]={};
+let item=sounds_fade_out[name];
+item.time_total=time;
+item.time_elapsed=0;
+item.action=action;
+try{ item.volume=sounds_volume_i[sounds[name].n].volume; return true; }
+catch(e){ delete sounds_fade_out[name]; return false; }
+}
+else{
+sounds_fade_in=[];
+sounds_fade_out=[];
+for(let name in sounds){
+sounds_fade_out[name]={};
+let item=sounds_fade_out[name];
+item.time_total=time;
+item.time_elapsed=0;
+item.action=action;
+try{ item.volume=sounds_volume_i[sounds[name].n].volume; }
+catch(e){ delete sounds_fade_out[name]; }
+}
+}
+
+}
+
+
+function sounds_fade_out_update(){
+
+
+for(let name in sounds_fade_out){
+
+
+let item=sounds_fade_out[name];
+item.time_elapsed+=delta;
+let volume=item.volume*(1-item.time_elapsed/item.time_total);
+if(0>volume){ volume=0; }
+try{
+sounds_volume_i[sounds[name].n].volume=volume;
+sounds_volume_i[sounds[name].n].gain.value=volume;
+}
+catch(e){}
+if(item.time_elapsed>=item.time_total){
+delete sounds_fade_out[name];
+if(item.action==1){ sounds[name].playbackRate.value=0; }
+if(item.action==2){ sounds_delete_fast(name); }
+}
+
+
+}
+
+
+}function loop(){
+
+
+if(stop==1){ return; }
+
+
+requestAnimationFrame(loop);
+
+
+stats.update();
+
+
+let started=performance.now();
+
+
+delta=clock.getDelta();
+controls.update(delta);
+camera_data_update();
+indicators_calculations();
+
+
+let max=mixers.length;
+
+
+for(let n=0;n<max;n++){
+mixers[n].update(delta);
+}
+
+
+gpuPanel_shader_name=""; // ДЛЯ ЗАМЕРА ВРЕМЕНИ ПОСТЭФФЕКТОВ
+if(gpuPanel_shader_name==""){ gpuPanel.startQuery(); }
+
+
+renderer.clear(); // ОЧИЩАЕМ ПОЛНОСТЬЮ
+renderer.render(scene,camera); // ОСНОВНАЯ СЦЕНА
+renderer_stats_update(0);
+renderer.clearDepth(); // УБИРАЕМ ГЛУБИНУ ОТ ПРОШЛОЙ СЦЕНЫ, ТО ЕСТЬ ЛИШНЕЕ
+renderer_hud.render(scene_hud,camera_hud); // HUD СЦЕНА
+renderer_stats_update(1,renderer_hud);
+
+
+if(gpuPanel_shader_name==""){ gpuPanel.endQuery(); }
+
+
+}
+</script>
+</body>
+</html>
