@@ -1,0 +1,2 @@
+{% for sprite in allSprites %}atlas["{{sprite.trimmedName}}"]=[[{{texture.size.width}}/{{sprite.frameRect.width}},{{texture.size.height}}/{{sprite.frameRect.height}},{{sprite.frameRect.x}}/{{texture.size.width}},1-({{sprite.frameRect.y}}+{{sprite.frameRect.height}})/{{texture.size.height}}],"{{texture.trimmedName}}",{{texture.size.width}},{{texture.size.height}},{{sprite.frameRect.width}},{{sprite.frameRect.height}},{{sprite.frameRect.y}}];
+{% endfor %}
